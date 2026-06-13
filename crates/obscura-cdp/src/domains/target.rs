@@ -58,7 +58,10 @@ pub async fn handle(method: &str, params: &Value, ctx: &mut CdpContext) -> Resul
             Ok(json!({ "targetInfos": targets }))
         }
         "createTarget" => {
-            let url = params.get("url").and_then(|v| v.as_str()).unwrap_or("about:blank");
+            let url = params
+                .get("url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("about:blank");
 
             // Same gate as Page.navigate (GHSA-q55h-vfv9-qcr5). Without this,
             // a CDP client can call Target.createTarget {url:"file:///etc/passwd"}
@@ -126,7 +129,8 @@ pub async fn handle(method: &str, params: &Value, ctx: &mut CdpContext) -> Resul
             // implicit "browser" target. Returning Unknown method aborts
             // the connect handshake before any user code runs.
             let session_id = "browser-session".to_string();
-            ctx.sessions.insert(session_id.clone(), "browser".to_string());
+            ctx.sessions
+                .insert(session_id.clone(), "browser".to_string());
 
             ctx.pending_events.push(CdpEvent::new(
                 "Target.attachedToTarget",
@@ -148,10 +152,13 @@ pub async fn handle(method: &str, params: &Value, ctx: &mut CdpContext) -> Resul
             Ok(json!({ "sessionId": session_id }))
         }
         "attachToTarget" => {
-            let target_id = params.get("targetId").and_then(|v| v.as_str())
+            let target_id = params
+                .get("targetId")
+                .and_then(|v| v.as_str())
                 .ok_or("targetId required")?;
             let session_id = format!("{}-session", target_id);
-            ctx.sessions.insert(session_id.clone(), target_id.to_string());
+            ctx.sessions
+                .insert(session_id.clone(), target_id.to_string());
 
             if let Some(page) = ctx.get_page(target_id) {
                 ctx.pending_events.push(CdpEvent::new(
@@ -175,7 +182,9 @@ pub async fn handle(method: &str, params: &Value, ctx: &mut CdpContext) -> Resul
             Ok(json!({ "sessionId": session_id }))
         }
         "closeTarget" => {
-            let target_id = params.get("targetId").and_then(|v| v.as_str())
+            let target_id = params
+                .get("targetId")
+                .and_then(|v| v.as_str())
                 .ok_or("targetId required")?;
             let session_id = format!("{}-session", target_id);
 
@@ -195,9 +204,7 @@ pub async fn handle(method: &str, params: &Value, ctx: &mut CdpContext) -> Resul
             Ok(json!({ "success": true }))
         }
         "setAutoAttach" => Ok(json!({})),
-        "getBrowserContexts" => {
-            Ok(json!({ "browserContextIds": [ctx.default_context.id] }))
-        }
+        "getBrowserContexts" => Ok(json!({ "browserContextIds": [ctx.default_context.id] })),
         "createBrowserContext" => {
             ctx.default_context.cookie_jar.clear();
             Ok(json!({ "browserContextId": ctx.default_context.id }))

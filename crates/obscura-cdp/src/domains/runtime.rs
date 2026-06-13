@@ -13,10 +13,11 @@ async fn emit_post_eval_nav(
     ctx: &mut CdpContext,
     session_id: &Option<String>,
 ) -> Result<(), String> {
-    let page = ctx
-        .get_session_page_mut(session_id)
-        .ok_or("No page")?;
-    let did_navigate = page.process_pending_navigation().await.map_err(|e| e.to_string())?;
+    let page = ctx.get_session_page_mut(session_id).ok_or("No page")?;
+    let did_navigate = page
+        .process_pending_navigation()
+        .await
+        .map_err(|e| e.to_string())?;
     if !did_navigate {
         return Ok(());
     }
@@ -112,9 +113,7 @@ pub async fn handle(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(30_000);
 
-            let page = ctx
-                .get_session_page_mut(session_id)
-                .ok_or("No page")?;
+            let page = ctx.get_session_page_mut(session_id).ok_or("No page")?;
             let info = match tokio::time::timeout(
                 std::time::Duration::from_millis(timeout_ms),
                 page.evaluate_for_cdp(expression, return_by_value, await_promise),
@@ -123,9 +122,7 @@ pub async fn handle(
             {
                 Ok(info) => info,
                 Err(_) => {
-                    return Err(format!(
-                        "Runtime.evaluate exceeded {timeout_ms}ms timeout"
-                    ));
+                    return Err(format!("Runtime.evaluate exceeded {timeout_ms}ms timeout"));
                 }
             };
             emit_post_eval_nav(ctx, session_id).await?;
@@ -159,11 +156,16 @@ pub async fn handle(
             // no-op and the default context is used.
             validate_context_id(params, "executionContextId", ctx, "callFunctionOn")?;
 
-            let page = ctx
-                .get_session_page_mut(session_id)
-                .ok_or("No page")?;
-            let info =
-                page.call_function_on_for_cdp(function_declaration, object_id, &arguments, return_by_value, await_promise).await;
+            let page = ctx.get_session_page_mut(session_id).ok_or("No page")?;
+            let info = page
+                .call_function_on_for_cdp(
+                    function_declaration,
+                    object_id,
+                    &arguments,
+                    return_by_value,
+                    await_promise,
+                )
+                .await;
             emit_post_eval_nav(ctx, session_id).await?;
 
             Ok(json!({ "result": remote_object_from_info(&info) }))
@@ -189,9 +191,7 @@ pub async fn handle(
             //      ElementHandle.
             let object_id = params.get("objectId").and_then(|v| v.as_str());
             if let Some(oid) = object_id {
-                let page = ctx
-                    .get_session_page_mut(session_id)
-                    .ok_or("No page")?;
+                let page = ctx.get_session_page_mut(session_id).ok_or("No page")?;
                 let escaped_oid = oid.replace('\\', "\\\\").replace('\'', "\\'");
                 let code = format!(
                     "(function() {{\
@@ -230,8 +230,10 @@ pub async fn handle(
                         .iter()
                         .map(|p| {
                             let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                            let prop_type =
-                                p.get("type").and_then(|v| v.as_str()).unwrap_or("undefined");
+                            let prop_type = p
+                                .get("type")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("undefined");
                             let mut remote = json!({ "type": prop_type });
                             if let Some(child_oid) = p.get("childOid").and_then(|v| v.as_str()) {
                                 remote["type"] = json!("object");
@@ -304,7 +306,9 @@ pub async fn handle(
         "addBinding" => {
             let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
             if !name.is_empty()
-                && name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$')
+                && name
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '_' || c == '$')
                 && !name.chars().next().unwrap_or('0').is_ascii_digit()
             {
                 // The shim forwards every call back to Rust through
@@ -371,10 +375,7 @@ fn validate_context_id(
         return Ok(());
     };
     if !ctx.valid_context_ids.contains(&id) {
-        return Err(format!(
-            "Cannot find context with specified id: {}",
-            id
-        ));
+        return Err(format!("Cannot find context with specified id: {}", id));
     }
     tracing::debug!(
         target: "obscura_cdp::runtime",

@@ -32,12 +32,8 @@ pub async fn handle(
     match method {
         "enable" => Ok(json!({})),
         "getFullAXTree" => {
-            let page = ctx
-                .get_session_page(session_id)
-                .ok_or("No page")?;
-            let nodes = page
-                .with_dom(|dom| build_ax_nodes(dom))
-                .unwrap_or_default();
+            let page = ctx.get_session_page(session_id).ok_or("No page")?;
+            let nodes = page.with_dom(|dom| build_ax_nodes(dom)).unwrap_or_default();
             Ok(json!({ "nodes": nodes }))
         }
         _ => Ok(json!({})),
@@ -133,21 +129,39 @@ fn build_ax_node(
     });
 
     if let Some(ref pid) = parent_id {
-        ax_node.as_object_mut().unwrap().insert("parentId".into(), json!(pid));
+        ax_node
+            .as_object_mut()
+            .unwrap()
+            .insert("parentId".into(), json!(pid));
     }
     if let Some(ref n) = name {
-        ax_node.as_object_mut().unwrap().insert("name".into(), json!(ax_value_string(n)));
+        ax_node
+            .as_object_mut()
+            .unwrap()
+            .insert("name".into(), json!(ax_value_string(n)));
     }
     if let Some(ref v) = value {
-        ax_node.as_object_mut().unwrap().insert("value".into(), json!(ax_value_string(v)));
+        ax_node
+            .as_object_mut()
+            .unwrap()
+            .insert("value".into(), json!(ax_value_string(v)));
     }
     if !properties.is_empty() {
-        ax_node.as_object_mut().unwrap().insert("properties".into(), json!(properties));
+        ax_node
+            .as_object_mut()
+            .unwrap()
+            .insert("properties".into(), json!(properties));
     }
     if !child_ids.is_empty() {
-        ax_node.as_object_mut().unwrap().insert("childIds".into(), json!(child_ids));
+        ax_node
+            .as_object_mut()
+            .unwrap()
+            .insert("childIds".into(), json!(child_ids));
     }
-    ax_node.as_object_mut().unwrap().insert("backendDOMNodeId".into(), json!(node_id.raw()));
+    ax_node
+        .as_object_mut()
+        .unwrap()
+        .insert("backendDOMNodeId".into(), json!(node_id.raw()));
 
     Some(ax_node)
 }
@@ -227,8 +241,7 @@ fn map_role(data: &NodeData) -> &'static str {
                 "textarea" => "textbox",
                 "select" => {
                     if attrs.iter().any(|a| {
-                        a.name.local.as_ref() == "multiple"
-                            || a.name.local.as_ref() == "size"
+                        a.name.local.as_ref() == "multiple" || a.name.local.as_ref() == "size"
                     }) {
                         "listbox"
                     } else {
@@ -255,17 +268,16 @@ fn map_role(data: &NodeData) -> &'static str {
                 "section" => "region",
                 "figure" => "figure",
                 "figcaption" => "StaticText",
-                "p" | "div" | "span" | "pre" | "blockquote" | "code"
-                | "em" | "strong" | "b" | "i" | "u" | "s" | "small"
-                | "sub" | "sup" | "mark" | "del" | "ins" => "generic",
+                "p" | "div" | "span" | "pre" | "blockquote" | "code" | "em" | "strong" | "b"
+                | "i" | "u" | "s" | "small" | "sub" | "sup" | "mark" | "del" | "ins" => "generic",
                 "iframe" => "Iframe",
                 _ => "generic",
             }
         }
         NodeData::Text { .. } => "StaticText",
-        NodeData::Doctype { .. } | NodeData::Comment { .. } | NodeData::ProcessingInstruction { .. } => {
-            ""
-        }
+        NodeData::Doctype { .. }
+        | NodeData::Comment { .. }
+        | NodeData::ProcessingInstruction { .. } => "",
     }
 }
 
@@ -382,7 +394,8 @@ fn compute_properties(_dom: &DomTree, node: &obscura_dom::Node) -> Vec<Value> {
         }
 
         // editable
-        if tag == "input" || tag == "textarea"
+        if tag == "input"
+            || tag == "textarea"
             || attrs
                 .iter()
                 .any(|a| a.name.local.as_ref() == "contenteditable" && a.value != "false")
@@ -391,18 +404,12 @@ fn compute_properties(_dom: &DomTree, node: &obscura_dom::Node) -> Vec<Value> {
         }
 
         // checked for checkboxes/radios
-        if attrs
-            .iter()
-            .any(|a| a.name.local.as_ref() == "checked")
-        {
+        if attrs.iter().any(|a| a.name.local.as_ref() == "checked") {
             props.push(json!({"name": "checked", "value": ax_value_boolean(true)}));
         }
 
         // disabled
-        if attrs
-            .iter()
-            .any(|a| a.name.local.as_ref() == "disabled")
-        {
+        if attrs.iter().any(|a| a.name.local.as_ref() == "disabled") {
             props.push(json!({"name": "disabled", "value": ax_value_boolean(true)}));
         }
 
@@ -414,10 +421,9 @@ fn compute_properties(_dom: &DomTree, node: &obscura_dom::Node) -> Vec<Value> {
         }
 
         // required
-        if attrs
-            .iter()
-            .any(|a| a.name.local.as_ref() == "required" || a.name.local.as_ref() == "aria-required")
-        {
+        if attrs.iter().any(|a| {
+            a.name.local.as_ref() == "required" || a.name.local.as_ref() == "aria-required"
+        }) {
             props.push(json!({"name": "required", "value": ax_value_boolean(true)}));
         }
 

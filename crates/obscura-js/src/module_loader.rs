@@ -73,8 +73,7 @@ impl ModuleLoader for ObscuraModuleLoader {
             // every chunk. The cache means the first import on a given
             // proxy pays the build cost once and every chunk after reuses
             // the same warm pool.
-            let client = crate::ops::cached_request_client(proxy_url.as_deref())
-                .map_err(io_err)?;
+            let client = crate::ops::cached_request_client(proxy_url.as_deref()).map_err(io_err)?;
 
             tracing::debug!(
                 "Loading ES module: {} (proxy: {})",
@@ -97,9 +96,10 @@ impl ModuleLoader for ObscuraModuleLoader {
                 )));
             }
 
-            let code = resp.text().await.map_err(|e| {
-                io_err(format!("Failed to read module body {}: {}", url, e))
-            })?;
+            let code = resp
+                .text()
+                .await
+                .map_err(|e| io_err(format!("Failed to read module body {}: {}", url, e)))?;
 
             let specifier = ModuleSpecifier::parse(&url)
                 .map_err(|e| io_err(format!("Invalid module URL {}: {}", url, e)))?;

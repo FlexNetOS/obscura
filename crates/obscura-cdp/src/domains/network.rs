@@ -46,7 +46,10 @@ pub async fn handle(
             Ok(json!({}))
         }
         "setUserAgentOverride" => {
-            let ua = params.get("userAgent").and_then(|v| v.as_str()).unwrap_or("");
+            let ua = params
+                .get("userAgent")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             if let Some(page) = ctx.get_session_page(session_id) {
                 page.http_client.set_user_agent(ua).await;
             }
@@ -122,7 +125,11 @@ mod tests {
             .expect("setCookie must succeed without a session");
         assert_eq!(resp["success"], json!(true));
         let cookies = ctx.default_context.cookie_jar.get_all_cookies();
-        assert_eq!(cookies.len(), 1, "default cookie jar must receive the cookie");
+        assert_eq!(
+            cookies.len(),
+            1,
+            "default cookie jar must receive the cookie"
+        );
         assert_eq!(cookies[0].name, "sid");
     }
 
@@ -157,10 +164,9 @@ mod tests {
     #[tokio::test]
     async fn get_all_cookies_returns_every_cookie_in_jar() {
         let mut ctx = CdpContext::new();
-        ctx.default_context.cookie_jar.set_cookies_from_cdp(vec![
-            sample_cookie("a"),
-            sample_cookie("b"),
-        ]);
+        ctx.default_context
+            .cookie_jar
+            .set_cookies_from_cdp(vec![sample_cookie("a"), sample_cookie("b")]);
         let resp = handle("getAllCookies", &json!({}), &mut ctx, &None)
             .await
             .expect("getAllCookies must succeed");

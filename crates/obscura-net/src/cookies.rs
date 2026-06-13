@@ -194,7 +194,9 @@ impl CookieJar {
             } else {
                 normalize_same_site(&cookie.same_site)
             };
-            let expires = cookie.expires.and_then(|e| if e > 0 { Some(e as u64) } else { None });
+            let expires = cookie
+                .expires
+                .and_then(|e| if e > 0 { Some(e as u64) } else { None });
             let entry = CookieEntry {
                 name: cookie.name.clone(),
                 value: cookie.value,
@@ -205,7 +207,9 @@ impl CookieJar {
                 expires,
                 same_site,
             };
-            jar.entry(cookie.domain).or_default().insert(cookie.name, entry);
+            jar.entry(cookie.domain)
+                .or_default()
+                .insert(cookie.name, entry);
         }
     }
 
@@ -417,15 +421,13 @@ impl CookieJar {
             }
         }
 
-        let json = serde_json::to_string_pretty(&all).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-        })?;
+        let json = serde_json::to_string_pretty(&all)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let mut tmp = tempfile::NamedTempFile::new_in(
-            path.parent().unwrap_or(std::path::Path::new(".")),
-        )?;
+        let mut tmp =
+            tempfile::NamedTempFile::new_in(path.parent().unwrap_or(std::path::Path::new(".")))?;
         tmp.write_all(json.as_bytes())?;
         tmp.persist(path).map_err(|e| e.error)?;
         Ok(())
@@ -439,10 +441,8 @@ impl CookieJar {
             return Ok(0);
         }
         let data = std::fs::read_to_string(path)?;
-        let cookies: Vec<CookieInfo> =
-            serde_json::from_str(&data).map_err(|e| {
-                std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-            })?;
+        let cookies: Vec<CookieInfo> = serde_json::from_str(&data)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let count = cookies.len();
         self.set_cookies_from_cdp(cookies);
         Ok(count)
@@ -471,16 +471,23 @@ pub struct CookieInfo {
 }
 
 fn parse_http_date(s: &str) -> Result<u64, ()> {
-    let months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+    let months = [
+        "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+    ];
 
     let s = s.replace('-', " ");
     let parts: Vec<&str> = s.split_whitespace().collect();
 
-    if parts.len() < 5 { return Err(()); }
+    if parts.len() < 5 {
+        return Err(());
+    }
 
     let day: u64 = parts[1].parse().map_err(|_| ())?;
-    let month = months.iter().position(|m| parts[2].to_lowercase().starts_with(m))
-        .ok_or(())? as u64 + 1;
+    let month = months
+        .iter()
+        .position(|m| parts[2].to_lowercase().starts_with(m))
+        .ok_or(())? as u64
+        + 1;
     let year: u64 = parts[3].parse().map_err(|_| ())?;
 
     let time_parts: Vec<&str> = parts[4].split(':').collect();
@@ -490,7 +497,11 @@ fn parse_http_date(s: &str) -> Result<u64, ()> {
 
     let mut days_total: u64 = 0;
     for y in 1970..year {
-        days_total += if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
+        days_total += if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) {
+            366
+        } else {
+            365
+        };
     }
     let days_in_month = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
     let is_leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
@@ -519,9 +530,15 @@ fn domain_matches(host: &str, domain: &str) -> bool {
     // domain = "example.com". The byte before the suffix in host
     // must be '.'.
     let prefix_len = host.len() - domain.len();
-    if prefix_len < 1 { return false; }
-    if !host.is_char_boundary(prefix_len) { return false; }
-    if host.as_bytes()[prefix_len - 1] != b'.' { return false; }
+    if prefix_len < 1 {
+        return false;
+    }
+    if !host.is_char_boundary(prefix_len) {
+        return false;
+    }
+    if host.as_bytes()[prefix_len - 1] != b'.' {
+        return false;
+    }
     host[prefix_len..].eq_ignore_ascii_case(domain)
 }
 
@@ -787,7 +804,11 @@ mod tests {
         }]);
         let url = Url::parse("https://www.xiaohongshu.com/explore").unwrap();
         let header = jar.get_cookie_header(&url);
-        assert!(header.contains("session=abc"), "Cookie header was: '{}'", header);
+        assert!(
+            header.contains("session=abc"),
+            "Cookie header was: '{}'",
+            header
+        );
     }
 
     #[test]
@@ -796,21 +817,25 @@ mod tests {
         use std::io::Write;
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("cookies.json");
-        
+
         // Write cookies like we exported from Chrome
         let cookies = serde_json::json!([
             {"name": "a1", "value": "testval", "domain": "xiaohongshu.com", "path": "/", "secure": false, "httpOnly": false},
             {"name": "web_session", "value": "sess123", "domain": "xiaohongshu.com", "path": "/", "secure": false, "httpOnly": true},
         ]);
         std::fs::write(&path, serde_json::to_string(&cookies).unwrap()).unwrap();
-        
+
         let jar = CookieJar::new();
         let count = jar.load_from_file(&path).unwrap();
         assert_eq!(count, 2, "Should load 2 cookies");
-        
+
         let url = Url::parse("https://www.xiaohongshu.com/explore").unwrap();
         let header = jar.get_cookie_header(&url);
         assert!(header.contains("a1=testval"), "Missing a1 in: '{}'", header);
-        assert!(header.contains("web_session=sess123"), "Missing web_session in: '{}'", header);
+        assert!(
+            header.contains("web_session=sess123"),
+            "Missing web_session in: '{}'",
+            header
+        );
     }
 }

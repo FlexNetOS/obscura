@@ -61,7 +61,11 @@ async fn one_client(port: u16, id_base: u64) -> Result<(), String> {
             _ => continue,
         };
         let v: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-        if let Some(t) = v.get("result").and_then(|r| r.get("targetId")).and_then(|s| s.as_str()) {
+        if let Some(t) = v
+            .get("result")
+            .and_then(|r| r.get("targetId"))
+            .and_then(|s| s.as_str())
+        {
             target_id = Some(t.to_string());
         }
         if let Some(s) = v
