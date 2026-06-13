@@ -104,9 +104,7 @@ async fn http_control_plane_unblocked_during_long_js() {
             let handle = std::thread::spawn(move || {
                 let start = Instant::now();
                 let mut stream = std::net::TcpStream::connect_timeout(
-                    &format!("127.0.0.1:{}", port_clone)
-                        .parse()
-                        .unwrap(),
+                    &format!("127.0.0.1:{}", port_clone).parse().unwrap(),
                     HTTP_TIMEOUT,
                 )?;
                 stream.set_read_timeout(Some(HTTP_TIMEOUT))?;

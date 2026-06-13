@@ -13,9 +13,9 @@ use tokio::sync::RwLock;
 use url::Url;
 
 #[cfg(feature = "stealth")]
-use crate::cookies::CookieJar;
+use crate::client::{ObscuraNetError, Response};
 #[cfg(feature = "stealth")]
-use crate::client::{Response, ObscuraNetError};
+use crate::cookies::CookieJar;
 
 #[cfg(feature = "stealth")]
 pub const STEALTH_USER_AGENT: &str =
@@ -52,7 +52,9 @@ impl StealthHttpClient {
             }
         }
 
-        let client = builder.build().expect("failed to build wreq stealth client");
+        let client = builder
+            .build()
+            .expect("failed to build wreq stealth client");
 
         StealthHttpClient {
             client,
@@ -92,12 +94,20 @@ impl StealthHttpClient {
                 req = req.header(k.as_str(), v.as_str());
             }
 
-            self.in_flight.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.in_flight
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let resp = req.send().await.map_err(|e| {
-                self.in_flight.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-                ObscuraNetError::Network(format!("{}: {} (source: {:?})", current_url, e, e.source()))
+                self.in_flight
+                    .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                ObscuraNetError::Network(format!(
+                    "{}: {} (source: {:?})",
+                    current_url,
+                    e,
+                    e.source()
+                ))
             })?;
-            self.in_flight.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            self.in_flight
+                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 
             let status = resp.status();
 
@@ -110,7 +120,12 @@ impl StealthHttpClient {
             let response_headers: HashMap<String, String> = resp
                 .headers()
                 .iter()
-                .map(|(k, v)| (k.as_str().to_lowercase(), v.to_str().unwrap_or("").to_string()))
+                .map(|(k, v)| {
+                    (
+                        k.as_str().to_lowercase(),
+                        v.to_str().unwrap_or("").to_string(),
+                    )
+                })
                 .collect();
 
             if status.is_redirection() {
@@ -127,9 +142,11 @@ impl StealthHttpClient {
                 }
             }
 
-            let body = resp.bytes().await.map_err(|e| {
-                ObscuraNetError::Network(format!("Failed to read body: {}", e))
-            })?.to_vec();
+            let body = resp
+                .bytes()
+                .await
+                .map_err(|e| ObscuraNetError::Network(format!("Failed to read body: {}", e)))?
+                .to_vec();
 
             return Ok(Response {
                 url: current_url,

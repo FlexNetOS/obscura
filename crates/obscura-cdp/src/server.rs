@@ -84,7 +84,14 @@ pub async fn start_with_host_and_security(
     storage_dir: Option<std::path::PathBuf>,
 ) -> anyhow::Result<()> {
     start_with_full_serve_options(
-        port, host, proxy, stealth, user_agent, allow_file_access, storage_dir, false,
+        port,
+        host,
+        proxy,
+        stealth,
+        user_agent,
+        allow_file_access,
+        storage_dir,
+        false,
     )
     .await
 }
@@ -99,7 +106,14 @@ pub async fn start_with_host_security_and_storage(
     storage_dir: Option<std::path::PathBuf>,
 ) -> anyhow::Result<()> {
     start_with_full_serve_options(
-        port, host, proxy, stealth, user_agent, allow_file_access, storage_dir, false,
+        port,
+        host,
+        proxy,
+        stealth,
+        user_agent,
+        allow_file_access,
+        storage_dir,
+        false,
     )
     .await
 }
@@ -136,10 +150,7 @@ pub async fn start_with_full_serve_options(
         .map_err(|e| anyhow::anyhow!("set_nonblocking: {}", e))?;
 
     info!("Obscura CDP server listening on ws://{}:{}", host, port);
-    info!(
-        "DevTools endpoint: ws://{}:{}/devtools/browser",
-        host, port
-    );
+    info!("DevTools endpoint: ws://{}:{}/devtools/browser", host, port);
     if allow_file_access {
         info!("file:// navigation enabled (--allow-file-access). Do not expose this port to untrusted networks.");
     }
@@ -180,7 +191,12 @@ pub async fn start_with_full_serve_options(
             let (msg_tx, msg_rx) = mpsc::unbounded_channel::<ServerMessage>();
 
             let _processor_handle = tokio::task::spawn_local(cdp_processor(
-                msg_rx, proxy, stealth, user_agent, allow_file_access, storage_dir,
+                msg_rx,
+                proxy,
+                stealth,
+                user_agent,
+                allow_file_access,
+                storage_dir,
                 allow_private_network,
                 shutdown_flag,
                 shutdown_notify.clone(),
@@ -256,7 +272,10 @@ fn accept_dispatch(
 
         let endpoint = if line.contains("/json/version") {
             Some("version")
-        } else if line.contains("/json/list") || line.contains("/json\r\n") || line.contains("/json HTTP") {
+        } else if line.contains("/json/list")
+            || line.contains("/json\r\n")
+            || line.contains("/json HTTP")
+        {
             Some("list")
         } else if line.contains("/json/protocol") {
             Some("protocol")
@@ -278,15 +297,16 @@ fn accept_dispatch(
     // control plane that this whole rework exists to keep alive). The
     // dropped `stream` closes itself; the client will see ECONNRESET and
     // can retry.
-    ws_tx
-        .try_send(stream)
-        .map_err(|e| match e {
-            mpsc::error::TrySendError::Full(_) => {
-                warn!("WS handoff channel full ({}); dropping new WebSocket connection", MAX_PENDING_WS_HANDOFFS);
-                anyhow::anyhow!("ws handoff channel full")
-            }
-            mpsc::error::TrySendError::Closed(_) => anyhow::anyhow!("accept channel closed"),
-        })
+    ws_tx.try_send(stream).map_err(|e| match e {
+        mpsc::error::TrySendError::Full(_) => {
+            warn!(
+                "WS handoff channel full ({}); dropping new WebSocket connection",
+                MAX_PENDING_WS_HANDOFFS
+            );
+            anyhow::anyhow!("ws handoff channel full")
+        }
+        mpsc::error::TrySendError::Closed(_) => anyhow::anyhow!("accept channel closed"),
+    })
 }
 
 /// Serve an HTTP `/json/*` endpoint with blocking I/O on the accept thread.
@@ -354,8 +374,12 @@ async fn cdp_processor(
     );
     let (itx, irx) = mpsc::unbounded_channel::<obscura_js::ops::InterceptedRequest>();
     ctx.intercept_tx = Some(itx);
-    let mut intercept_rx: Option<mpsc::UnboundedReceiver<obscura_js::ops::InterceptedRequest>> = Some(irx);
-    let mut intercepted_paused: HashMap<String, tokio::sync::oneshot::Sender<obscura_js::ops::InterceptResolution>> = HashMap::new();
+    let mut intercept_rx: Option<mpsc::UnboundedReceiver<obscura_js::ops::InterceptedRequest>> =
+        Some(irx);
+    let mut intercepted_paused: HashMap<
+        String,
+        tokio::sync::oneshot::Sender<obscura_js::ops::InterceptResolution>,
+    > = HashMap::new();
 
     // Issue #19 follow-up: messages deferred from inside
     // `process_with_interception` because routing them through
@@ -363,8 +387,7 @@ async fn cdp_processor(
     // tripped V8's TryGetCurrent invariant. Drained at the top of each
     // outer iteration so they get processed sequentially with no other nav
     // in flight.
-    let mut deferred: std::collections::VecDeque<ServerMessage> =
-        std::collections::VecDeque::new();
+    let mut deferred: std::collections::VecDeque<ServerMessage> = std::collections::VecDeque::new();
 
     // Subscribe to Ctrl-C once. The future is single-shot, so we break out of
     // the outer loop when it fires and never poll it again. Without this the
@@ -396,10 +419,7 @@ async fn cdp_processor(
 
         match msg {
             ServerMessage::NewConnection { reply_tx } => {
-                let _ = reply_tx.send(
-                    json!({"__init": true})
-                        .to_string(),
-                );
+                let _ = reply_tx.send(json!({"__init": true}).to_string());
             }
             ServerMessage::Cdp(cdp_msg) => {
                 // Route every Page.navigate through the spawn-and-defer path,
@@ -414,19 +434,28 @@ async fn cdp_processor(
 
                 if is_navigation {
                     process_with_interception(
-                        &cdp_msg.text, &mut ctx, &cdp_msg.reply_tx, &mut rx,
-                        &mut intercept_rx, &mut intercepted_paused,
+                        &cdp_msg.text,
+                        &mut ctx,
+                        &cdp_msg.reply_tx,
+                        &mut rx,
+                        &mut intercept_rx,
+                        &mut intercepted_paused,
                         &mut deferred,
-                    ).await;
+                    )
+                    .await;
                 } else {
                     if cdp_msg.text.contains("Fetch.") {
-                        handle_fetch_resolution(&cdp_msg.text, &mut ctx, &cdp_msg.reply_tx, &mut intercepted_paused);
+                        handle_fetch_resolution(
+                            &cdp_msg.text,
+                            &mut ctx,
+                            &cdp_msg.reply_tx,
+                            &mut intercepted_paused,
+                        );
                     }
                     process_cdp_message(&cdp_msg.text, &mut ctx, &cdp_msg.reply_tx).await;
                 }
             }
         }
-
     }
 
     // Single exit point handles both Ctrl-C shutdown and the channel being
@@ -439,33 +468,74 @@ fn handle_fetch_resolution(
     text: &str,
     _ctx: &mut CdpContext,
     reply_tx: &mpsc::UnboundedSender<String>,
-    intercepted_paused: &mut HashMap<String, tokio::sync::oneshot::Sender<obscura_js::ops::InterceptResolution>>,
+    intercepted_paused: &mut HashMap<
+        String,
+        tokio::sync::oneshot::Sender<obscura_js::ops::InterceptResolution>,
+    >,
 ) {
     if let Ok(req) = serde_json::from_str::<CdpRequest>(text) {
         let method = req.method.as_str();
-        let request_id = req.params.get("requestId").and_then(|v| v.as_str()).unwrap_or("");
-        tracing::info!("INTERCEPTION resolution: {} for {}, paused_count={}", method, request_id, intercepted_paused.len());
+        let request_id = req
+            .params
+            .get("requestId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        tracing::info!(
+            "INTERCEPTION resolution: {} for {}, paused_count={}",
+            method,
+            request_id,
+            intercepted_paused.len()
+        );
 
         if let Some(resolver) = intercepted_paused.remove(request_id) {
             tracing::info!("INTERCEPTION resolved: {}", request_id);
             let resolution = match method {
                 "Fetch.continueRequest" => obscura_js::ops::InterceptResolution::Continue {
-                    url: None, method: None, headers: None, body: None,
+                    url: None,
+                    method: None,
+                    headers: None,
+                    body: None,
                 },
                 "Fetch.fulfillRequest" => {
-                    let status = req.params.get("responseCode").and_then(|v| v.as_u64()).unwrap_or(200) as u16;
-                    let raw_body = req.params.get("body").and_then(|v| v.as_str()).unwrap_or("");
+                    let status = req
+                        .params
+                        .get("responseCode")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(200) as u16;
+                    let raw_body = req
+                        .params
+                        .get("body")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
                     let body = decode_base64(raw_body);
-                    let headers = req.params.get("responseHeaders")
+                    let headers = req
+                        .params
+                        .get("responseHeaders")
                         .and_then(|v| v.as_array())
-                        .map(|arr| arr.iter().filter_map(|h| {
-                            Some((h.get("name")?.as_str()?.to_string(), h.get("value")?.as_str()?.to_string()))
-                        }).collect())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|h| {
+                                    Some((
+                                        h.get("name")?.as_str()?.to_string(),
+                                        h.get("value")?.as_str()?.to_string(),
+                                    ))
+                                })
+                                .collect()
+                        })
                         .unwrap_or_default();
-                    obscura_js::ops::InterceptResolution::Fulfill { status, headers, body }
+                    obscura_js::ops::InterceptResolution::Fulfill {
+                        status,
+                        headers,
+                        body,
+                    }
                 }
                 "Fetch.failRequest" => {
-                    let reason = req.params.get("errorReason").and_then(|v| v.as_str()).unwrap_or("Failed").to_string();
+                    let reason = req
+                        .params
+                        .get("errorReason")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Failed")
+                        .to_string();
                     obscura_js::ops::InterceptResolution::Fail { reason }
                 }
                 _ => return,
@@ -485,7 +555,10 @@ async fn process_with_interception(
     reply_tx: &mpsc::UnboundedSender<String>,
     rx: &mut mpsc::UnboundedReceiver<ServerMessage>,
     intercept_rx: &mut Option<mpsc::UnboundedReceiver<obscura_js::ops::InterceptedRequest>>,
-    intercepted_paused: &mut HashMap<String, tokio::sync::oneshot::Sender<obscura_js::ops::InterceptResolution>>,
+    intercepted_paused: &mut HashMap<
+        String,
+        tokio::sync::oneshot::Sender<obscura_js::ops::InterceptResolution>,
+    >,
     deferred: &mut std::collections::VecDeque<ServerMessage>,
 ) {
     let req: CdpRequest = match serde_json::from_str(text) {
@@ -538,8 +611,18 @@ async fn process_with_interception(
 
     let url = req.params.get("url").and_then(|v| v.as_str()).unwrap_or("");
     let wait_until = crate::domains::page::parse_wait_until(&req.params);
-    let nav_method = req.params.get("__method").and_then(|v| v.as_str()).unwrap_or("GET").to_string();
-    let nav_body = req.params.get("__body").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let nav_method = req
+        .params
+        .get("__method")
+        .and_then(|v| v.as_str())
+        .unwrap_or("GET")
+        .to_string();
+    let nav_body = req
+        .params
+        .get("__body")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
 
     let preload_scripts: Vec<String> = ctx.preload_scripts.iter().map(|(_, s)| s.clone()).collect();
 
@@ -551,7 +634,8 @@ async fn process_with_interception(
     let frame_id = page.frame_id.clone();
     let loader_id = format!("loader-{}", uuid::Uuid::new_v4());
 
-    let (nav_done_tx, mut nav_done_rx) = mpsc::channel::<(obscura_browser::Page, Result<(), String>)>(1);
+    let (nav_done_tx, mut nav_done_rx) =
+        mpsc::channel::<(obscura_browser::Page, Result<(), String>)>(1);
     let url_owned = url.to_string();
 
     tokio::task::spawn_local(async move {
@@ -565,7 +649,8 @@ async fn process_with_interception(
         // to the page so navigate_single can inject them at the right point.
         page.set_preload_scripts(preload_scripts);
         let result = if nav_method == "POST" && !nav_body.is_empty() {
-            page.navigate_with_wait_post(&url_owned, wait_until, &nav_method, &nav_body).await
+            page.navigate_with_wait_post(&url_owned, wait_until, &nav_method, &nav_body)
+                .await
         } else {
             page.navigate_with_wait(&url_owned, wait_until).await
         }
@@ -775,7 +860,12 @@ async fn process_cdp_message(
         }
     };
 
-    tracing::debug!("CDP: {} (id={}, s={:?})", req.method, req.id, req.session_id);
+    tracing::debug!(
+        "CDP: {} (id={}, s={:?})",
+        req.method,
+        req.id,
+        req.session_id
+    );
 
     let response = dispatch::dispatch(&req, ctx).await;
 
@@ -796,7 +886,12 @@ async fn process_cdp_message(
     }
 
     if let Some((nav_url, nav_method, nav_body)) = check_pending_navigation(ctx, &req.session_id) {
-        tracing::info!("JS-triggered nav: {} {} (body: {} bytes)", nav_method, nav_url, nav_body.len());
+        tracing::info!(
+            "JS-triggered nav: {} {} (body: {} bytes)",
+            nav_method,
+            nav_url,
+            nav_body.len()
+        );
         let nav_req = CdpRequest {
             id: 0,
             method: "Page.navigate".to_string(),
@@ -833,8 +928,12 @@ fn decode_base64(input: &str) -> String {
             chunk.get(3).copied().unwrap_or(0),
         ];
         out.push((b[0] << 2) | (b[1] >> 4));
-        if chunk.len() > 2 { out.push((b[1] << 4) | (b[2] >> 2)); }
-        if chunk.len() > 3 { out.push((b[2] << 6) | b[3]); }
+        if chunk.len() > 2 {
+            out.push((b[1] << 4) | (b[2] >> 2));
+        }
+        if chunk.len() > 3 {
+            out.push((b[2] << 6) | b[3]);
+        }
     }
     String::from_utf8_lossy(&out).to_string()
 }
@@ -843,38 +942,44 @@ fn fast_path_response(text: &str) -> Option<String> {
     let req: CdpRequest = serde_json::from_str(text).ok()?;
 
     let result = match req.method.as_str() {
-        "Network.enable" | "Network.setCacheDisabled" | "Network.setRequestInterception" |
-        "Page.enable" | "Page.setLifecycleEventsEnabled" | "Page.setInterceptFileChooserDialog" |
-        "Runtime.runIfWaitingForDebugger" | "Runtime.discardConsoleEntries" |
-        "Performance.enable" | "Log.enable" | "Security.enable" |
-        "Emulation.setDeviceMetricsOverride" | "Emulation.setTouchEmulationEnabled" |
-        "CSS.enable" | "Accessibility.enable" | "ServiceWorker.enable" |
-        "Inspector.enable" | "Debugger.enable" | "Profiler.enable" |
-        "HeapProfiler.enable" | "Overlay.enable" | "Storage.enable" |
-        "Target.setAutoAttach" => {
-            Some(json!({}))
-        }
-        "Browser.getVersion" => {
-            Some(json!({
-                "protocolVersion": "1.3",
-                "product": "Chrome/145.0.0.0",
-                "revision": "@0000000000000000000000000000000000000000",
-                "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
-                "jsVersion": "14.5.0.0",
-            }))
-        }
-        "Browser.setDownloadBehavior" | "Browser.getWindowBounds" => {
-            Some(json!({}))
-        }
+        "Network.enable"
+        | "Network.setCacheDisabled"
+        | "Network.setRequestInterception"
+        | "Page.enable"
+        | "Page.setLifecycleEventsEnabled"
+        | "Page.setInterceptFileChooserDialog"
+        | "Runtime.runIfWaitingForDebugger"
+        | "Runtime.discardConsoleEntries"
+        | "Performance.enable"
+        | "Log.enable"
+        | "Security.enable"
+        | "Emulation.setDeviceMetricsOverride"
+        | "Emulation.setTouchEmulationEnabled"
+        | "CSS.enable"
+        | "Accessibility.enable"
+        | "ServiceWorker.enable"
+        | "Inspector.enable"
+        | "Debugger.enable"
+        | "Profiler.enable"
+        | "HeapProfiler.enable"
+        | "Overlay.enable"
+        | "Storage.enable"
+        | "Target.setAutoAttach" => Some(json!({})),
+        "Browser.getVersion" => Some(json!({
+            "protocolVersion": "1.3",
+            "product": "Chrome/145.0.0.0",
+            "revision": "@0000000000000000000000000000000000000000",
+            "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+            "jsVersion": "14.5.0.0",
+        })),
+        "Browser.setDownloadBehavior" | "Browser.getWindowBounds" => Some(json!({})),
         // Critical: Puppeteer calls this as the *first* CDP command on connect
         // (`BrowserConnector._connectToCdpBrowser`). If another client or a long
         // `Page.navigate` / interception holds the single `cdp_processor` task,
         // queued Target commands starve and Puppeteer hits protocolTimeout on
         // `Target.getBrowserContexts`. Fast-path bypasses the queue — same payload
         // as `domains::target::handle` when default context id is `"default"`.
-        "Target.getBrowserContexts" => {
-            Some(json!({ "browserContextIds": ["default"] }))
-        }
+        "Target.getBrowserContexts" => Some(json!({ "browserContextIds": ["default"] })),
         _ => None,
     };
 
@@ -886,10 +991,11 @@ fn fast_path_response(text: &str) -> Option<String> {
     }
 }
 
-fn check_pending_navigation(ctx: &CdpContext, session_id: &Option<String>) -> Option<(String, String, String)> {
-    let page_id = session_id
-        .as_ref()
-        .and_then(|sid| ctx.sessions.get(sid))?;
+fn check_pending_navigation(
+    ctx: &CdpContext,
+    session_id: &Option<String>,
+) -> Option<(String, String, String)> {
+    let page_id = session_id.as_ref().and_then(|sid| ctx.sessions.get(sid))?;
     let page = ctx.pages.iter().find(|p| &p.id == page_id)?;
     page.take_pending_navigation()
 }

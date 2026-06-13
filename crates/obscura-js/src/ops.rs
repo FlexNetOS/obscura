@@ -3,15 +3,19 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use deno_core::op2;
-use deno_core::OpState;
-use deno_core::Extension;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use deno_core::op2;
+use deno_core::Extension;
+use deno_core::OpState;
 use obscura_dom::{DomTree, NodeData, NodeId};
 use obscura_net::{CookieJar, ObscuraHttpClient};
 use tokio::sync::Mutex;
 
-pub type InterceptCallback = Arc<Mutex<Option<Box<dyn Fn(String, String, String) -> Option<(u16, String, String)> + Send + Sync>>>>;
+pub type InterceptCallback = Arc<
+    Mutex<
+        Option<Box<dyn Fn(String, String, String) -> Option<(u16, String, String)> + Send + Sync>>,
+    >,
+>;
 
 #[derive(Debug)]
 pub enum InterceptResolution {
@@ -26,7 +30,9 @@ pub enum InterceptResolution {
         headers: HashMap<String, String>,
         body: String,
     },
-    Fail { reason: String },
+    Fail {
+        reason: String,
+    },
 }
 
 pub struct InterceptedRequest {
@@ -82,7 +88,12 @@ pub type SharedState = Rc<RefCell<ObscuraState>>;
 
 #[op2]
 #[string]
-fn op_dom(state: &OpState, #[string] cmd: String, #[string] arg1: String, #[string] arg2: String) -> String {
+fn op_dom(
+    state: &OpState,
+    #[string] cmd: String,
+    #[string] arg1: String,
+    #[string] arg2: String,
+) -> String {
     // Anti-panic boundary: a panic in a DOM op would unwind through deno_core
     // into V8's FFI frame, where V8_Fatal calls abort(3) and takes the whole
     // engine (and every CDP client) down. Catch it so one malformed selector or
@@ -114,7 +125,10 @@ fn op_dom_inner(state: &OpState, cmd: String, arg1: String, arg2: String) -> Str
         "document_element" => {
             for cid in dom.children(dom.document()) {
                 if let Some(n) = dom.get_node(cid) {
-                    if n.as_element().map(|name| name.local.as_ref() == "html").unwrap_or(false) {
+                    if n.as_element()
+                        .map(|name| name.local.as_ref() == "html")
+                        .unwrap_or(false)
+                    {
                         return cid.index().to_string();
                     }
                 }
@@ -124,13 +138,19 @@ fn op_dom_inner(state: &OpState, cmd: String, arg1: String, arg2: String) -> Str
         "document_doctype" => {
             for cid in dom.children(dom.document()) {
                 if let Some(n) = dom.get_node(cid) {
-                    if let obscura_dom::NodeData::Doctype { name, public_id, system_id } = &n.data {
+                    if let obscura_dom::NodeData::Doctype {
+                        name,
+                        public_id,
+                        system_id,
+                    } = &n.data
+                    {
                         return serde_json::json!({
                             "name": name,
                             "publicId": public_id,
                             "systemId": system_id,
                             "nodeId": cid.index(),
-                        }).to_string();
+                        })
+                        .to_string();
                     }
                 }
             }
@@ -147,45 +167,74 @@ fn op_dom_inner(state: &OpState, cmd: String, arg1: String, arg2: String) -> Str
                 Some(n) => n.index().to_string(),
                 None => {
                     // Fall back to full scan for the live document.
-                    let sel = format!("[id=\"{}\"]", arg1.replace('\\', "\\\\").replace('"', "\\\""));
-                    dom.query_selector(&sel).ok().flatten()
-                        .map(|id| id.index().to_string()).unwrap_or("-1".into())
+                    let sel = format!(
+                        "[id=\"{}\"]",
+                        arg1.replace('\\', "\\\\").replace('"', "\\\"")
+                    );
+                    dom.query_selector(&sel)
+                        .ok()
+                        .flatten()
+                        .map(|id| id.index().to_string())
+                        .unwrap_or("-1".into())
                 }
             }
         }
-        "query_selector" => {
-            dom.query_selector(&arg1).ok().flatten().map(|id| id.index().to_string()).unwrap_or("-1".into())
-        }
+        "query_selector" => dom
+            .query_selector(&arg1)
+            .ok()
+            .flatten()
+            .map(|id| id.index().to_string())
+            .unwrap_or("-1".into()),
         "query_selector_all" => {
-            let ids: Vec<i32> = dom.query_selector_all(&arg1).ok()
-                .map(|ids| ids.iter().map(|id| id.index() as i32).collect()).unwrap_or_default();
+            let ids: Vec<i32> = dom
+                .query_selector_all(&arg1)
+                .ok()
+                .map(|ids| ids.iter().map(|id| id.index() as i32).collect())
+                .unwrap_or_default();
             serde_json::to_string(&ids).unwrap_or("[]".into())
         }
         "query_selector_scoped" => {
             let root_nid = arg1.parse::<u32>().unwrap_or(0);
-            dom.query_selector_from(NodeId::new(root_nid), &arg2).ok().flatten()
-                .map(|id| id.index().to_string()).unwrap_or("-1".into())
+            dom.query_selector_from(NodeId::new(root_nid), &arg2)
+                .ok()
+                .flatten()
+                .map(|id| id.index().to_string())
+                .unwrap_or("-1".into())
         }
         "query_selector_all_scoped" => {
             let root_nid = arg1.parse::<u32>().unwrap_or(0);
-            let ids: Vec<i32> = dom.query_selector_all_from(NodeId::new(root_nid), &arg2).ok()
-                .map(|ids| ids.iter().map(|id| id.index() as i32).collect()).unwrap_or_default();
+            let ids: Vec<i32> = dom
+                .query_selector_all_from(NodeId::new(root_nid), &arg2)
+                .ok()
+                .map(|ids| ids.iter().map(|id| id.index() as i32).collect())
+                .unwrap_or_default();
             serde_json::to_string(&ids).unwrap_or("[]".into())
         }
         "node_type" => {
             let nid = arg1.parse::<u32>().unwrap_or(0);
             dom.with_node(NodeId::new(nid), |n| match &n.data {
-                NodeData::Document => "9", NodeData::Element { .. } => "1", NodeData::Text { .. } => "3",
-                NodeData::Comment { .. } => "8", NodeData::Doctype { .. } => "10", NodeData::ProcessingInstruction { .. } => "7",
-            }).unwrap_or("0").into()
+                NodeData::Document => "9",
+                NodeData::Element { .. } => "1",
+                NodeData::Text { .. } => "3",
+                NodeData::Comment { .. } => "8",
+                NodeData::Doctype { .. } => "10",
+                NodeData::ProcessingInstruction { .. } => "7",
+            })
+            .unwrap_or("0")
+            .into()
         }
         "node_name" => {
             let nid = arg1.parse::<u32>().unwrap_or(0);
-            let name: String = dom.with_node(NodeId::new(nid), |n| match &n.data {
-                NodeData::Document => "#document".to_string(), NodeData::Element { name, .. } => name.local.as_ref().to_ascii_uppercase(),
-                NodeData::Text { .. } => "#text".to_string(), NodeData::Comment { .. } => "#comment".to_string(),
-                NodeData::Doctype { name, .. } => name.clone(), NodeData::ProcessingInstruction { target, .. } => target.clone(),
-            }).unwrap_or_default();
+            let name: String = dom
+                .with_node(NodeId::new(nid), |n| match &n.data {
+                    NodeData::Document => "#document".to_string(),
+                    NodeData::Element { name, .. } => name.local.as_ref().to_ascii_uppercase(),
+                    NodeData::Text { .. } => "#text".to_string(),
+                    NodeData::Comment { .. } => "#comment".to_string(),
+                    NodeData::Doctype { name, .. } => name.clone(),
+                    NodeData::ProcessingInstruction { target, .. } => target.clone(),
+                })
+                .unwrap_or_default();
             serde_json::to_string(&name).unwrap_or("\"\"".into())
         }
         "text_content" => {
@@ -195,24 +244,44 @@ fn op_dom_inner(state: &OpState, cmd: String, arg1: String, arg2: String) -> Str
         "parent_node" | "first_child" | "last_child" | "next_sibling" | "prev_sibling" => {
             let nid = arg1.parse::<u32>().unwrap_or(0);
             dom.with_node(NodeId::new(nid), |n| match cmd.as_str() {
-                "parent_node" => n.parent, "first_child" => n.first_child,
-                "last_child" => n.last_child, "next_sibling" => n.next_sibling,
-                "prev_sibling" => n.prev_sibling, _ => None,
-            }).flatten().map(|id| id.index().to_string()).unwrap_or("-1".into())
+                "parent_node" => n.parent,
+                "first_child" => n.first_child,
+                "last_child" => n.last_child,
+                "next_sibling" => n.next_sibling,
+                "prev_sibling" => n.prev_sibling,
+                _ => None,
+            })
+            .flatten()
+            .map(|id| id.index().to_string())
+            .unwrap_or("-1".into())
         }
         "child_nodes" => {
             let nid = arg1.parse::<u32>().unwrap_or(0);
-            let ids: Vec<i32> = dom.children(NodeId::new(nid)).iter().map(|id| id.index() as i32).collect();
+            let ids: Vec<i32> = dom
+                .children(NodeId::new(nid))
+                .iter()
+                .map(|id| id.index() as i32)
+                .collect();
             serde_json::to_string(&ids).unwrap_or("[]".into())
         }
         "tag_name" => {
             let nid = arg1.parse::<u32>().unwrap_or(0);
-            let name = dom.with_node(NodeId::new(nid), |n| n.as_element().map(|name| name.local.as_ref().to_ascii_uppercase())).flatten().unwrap_or_default();
+            let name = dom
+                .with_node(NodeId::new(nid), |n| {
+                    n.as_element()
+                        .map(|name| name.local.as_ref().to_ascii_uppercase())
+                })
+                .flatten()
+                .unwrap_or_default();
             serde_json::to_string(&name).unwrap_or("\"\"".into())
         }
         "get_attribute" => {
             let nid = arg1.parse::<u32>().unwrap_or(0);
-            let val = dom.with_node(NodeId::new(nid), |n| n.get_attribute(&arg2).map(|s| s.to_string())).flatten();
+            let val = dom
+                .with_node(NodeId::new(nid), |n| {
+                    n.get_attribute(&arg2).map(|s| s.to_string())
+                })
+                .flatten();
             serde_json::to_string(&val).unwrap_or("null".into())
         }
         "attribute_names" => {
@@ -220,7 +289,11 @@ fn op_dom_inner(state: &OpState, cmd: String, arg1: String, arg2: String) -> Str
             let names: Vec<String> = dom
                 .with_node(NodeId::new(nid), |n| {
                     n.attrs()
-                        .map(|a| a.iter().map(|x| x.name.local.as_ref().to_string()).collect())
+                        .map(|a| {
+                            a.iter()
+                                .map(|x| x.name.local.as_ref().to_string())
+                                .collect()
+                        })
                         .unwrap_or_default()
                 })
                 .unwrap_or_default();
@@ -231,7 +304,9 @@ fn op_dom_inner(state: &OpState, cmd: String, arg1: String, arg2: String) -> Str
             let node_id = NodeId::new(nid);
             if let Some((name, value)) = arg2.split_once('\0') {
                 if name == "id" {
-                    let old_id = dom.with_node(node_id, |n| n.get_attribute("id").map(|s| s.to_string())).flatten();
+                    let old_id = dom
+                        .with_node(node_id, |n| n.get_attribute("id").map(|s| s.to_string()))
+                        .flatten();
                     dom.with_node_mut(node_id, |n| n.set_attribute(name, value.to_string()));
                     dom.update_id_index(node_id, old_id.as_deref(), Some(value));
                 } else {
@@ -252,19 +327,34 @@ fn op_dom_inner(state: &OpState, cmd: String, arg1: String, arg2: String) -> Str
             // Reject if either nid failed to parse (was "undefined"/empty) — those
             // default to 0 which is the document root, and silently operating on it
             // corrupts the tree. Require both args to be valid positive integers.
-            let parent = match arg1.parse::<u32>() { Ok(n) => n, Err(_) => return "false".into() };
-            let child = match arg2.parse::<u32>() { Ok(n) => n, Err(_) => return "false".into() };
+            let parent = match arg1.parse::<u32>() {
+                Ok(n) => n,
+                Err(_) => return "false".into(),
+            };
+            let child = match arg2.parse::<u32>() {
+                Ok(n) => n,
+                Err(_) => return "false".into(),
+            };
             dom.append_child(NodeId::new(parent), NodeId::new(child));
             "true".into()
         }
         "remove_child" => {
-            let child = match arg1.parse::<u32>() { Ok(n) => n, Err(_) => return "false".into() };
+            let child = match arg1.parse::<u32>() {
+                Ok(n) => n,
+                Err(_) => return "false".into(),
+            };
             dom.remove_child(NodeId::new(child));
             "true".into()
         }
         "insert_before" => {
-            let new_node = match arg1.parse::<u32>() { Ok(n) => n, Err(_) => return "false".into() };
-            let ref_node = match arg2.parse::<u32>() { Ok(n) => n, Err(_) => return "false".into() };
+            let new_node = match arg1.parse::<u32>() {
+                Ok(n) => n,
+                Err(_) => return "false".into(),
+            };
+            let ref_node = match arg2.parse::<u32>() {
+                Ok(n) => n,
+                Err(_) => return "false".into(),
+            };
             dom.insert_before(NodeId::new(ref_node), NodeId::new(new_node));
             "true".into()
         }
@@ -298,37 +388,54 @@ fn op_dom_inner(state: &OpState, cmd: String, arg1: String, arg2: String) -> Str
         }
         "set_text_content" => {
             let nid = arg1.parse::<u32>().unwrap_or(0);
-            dom.with_node_mut(NodeId::new(nid), |n| {
-                match &mut n.data {
-                    NodeData::Text { contents } => { *contents = arg2.clone(); }
-                    NodeData::Comment { contents } => { *contents = arg2.clone(); }
-                    NodeData::ProcessingInstruction { data, .. } => { *data = arg2.clone(); }
-                    _ => {}
+            dom.with_node_mut(NodeId::new(nid), |n| match &mut n.data {
+                NodeData::Text { contents } => {
+                    *contents = arg2.clone();
                 }
+                NodeData::Comment { contents } => {
+                    *contents = arg2.clone();
+                }
+                NodeData::ProcessingInstruction { data, .. } => {
+                    *data = arg2.clone();
+                }
+                _ => {}
             });
             "true".into()
         }
-        "create_document_fragment" => {
-            dom.new_node(NodeData::Document).index().to_string()
-        }
-        "create_element" => {
-            dom.new_node(NodeData::Element {
-                name: html5ever::QualName::new(None, html5ever::ns!(html), html5ever::LocalName::from(arg1.as_str())),
-                attrs: vec![], template_contents: None, mathml_annotation_xml_integration_point: false,
-            }).index().to_string()
-        }
-        "create_text_node" => {
-            dom.new_node(NodeData::Text { contents: arg1.clone() }).index().to_string()
-        }
-        "create_comment_node" => {
-            dom.new_node(NodeData::Comment { contents: arg1.clone() }).index().to_string()
-        }
+        "create_document_fragment" => dom.new_node(NodeData::Document).index().to_string(),
+        "create_element" => dom
+            .new_node(NodeData::Element {
+                name: html5ever::QualName::new(
+                    None,
+                    html5ever::ns!(html),
+                    html5ever::LocalName::from(arg1.as_str()),
+                ),
+                attrs: vec![],
+                template_contents: None,
+                mathml_annotation_xml_integration_point: false,
+            })
+            .index()
+            .to_string(),
+        "create_text_node" => dom
+            .new_node(NodeData::Text {
+                contents: arg1.clone(),
+            })
+            .index()
+            .to_string(),
+        "create_comment_node" => dom
+            .new_node(NodeData::Comment {
+                contents: arg1.clone(),
+            })
+            .index()
+            .to_string(),
         "create_processing_instruction" => {
             // arg1 = target, arg2 = data
             dom.new_node(NodeData::ProcessingInstruction {
                 target: arg1.clone(),
                 data: arg2.clone(),
-            }).index().to_string()
+            })
+            .index()
+            .to_string()
         }
         "create_doctype" => {
             // arg1 = name, arg2 = public_id. system_id stored only in the
@@ -338,47 +445,65 @@ fn op_dom_inner(state: &OpState, cmd: String, arg1: String, arg2: String) -> Str
                 name: arg1.clone(),
                 public_id: arg2.clone(),
                 system_id: String::new(),
-            }).index().to_string()
+            })
+            .index()
+            .to_string()
         }
         "pi_target" => {
             let nid = arg1.parse::<u32>().unwrap_or(0);
-            let val = dom.with_node(NodeId::new(nid), |n| match &n.data {
-                NodeData::ProcessingInstruction { target, .. } => Some(target.clone()),
-                _ => None,
-            }).flatten().unwrap_or_default();
+            let val = dom
+                .with_node(NodeId::new(nid), |n| match &n.data {
+                    NodeData::ProcessingInstruction { target, .. } => Some(target.clone()),
+                    _ => None,
+                })
+                .flatten()
+                .unwrap_or_default();
             serde_json::to_string(&val).unwrap_or("\"\"".into())
         }
         "doctype_name" => {
             let nid = arg1.parse::<u32>().unwrap_or(0);
-            let val = dom.with_node(NodeId::new(nid), |n| match &n.data {
-                NodeData::Doctype { name, .. } => Some(name.clone()),
-                _ => None,
-            }).flatten().unwrap_or_default();
+            let val = dom
+                .with_node(NodeId::new(nid), |n| match &n.data {
+                    NodeData::Doctype { name, .. } => Some(name.clone()),
+                    _ => None,
+                })
+                .flatten()
+                .unwrap_or_default();
             serde_json::to_string(&val).unwrap_or("\"\"".into())
         }
         "doctype_public_id" => {
             let nid = arg1.parse::<u32>().unwrap_or(0);
-            let val = dom.with_node(NodeId::new(nid), |n| match &n.data {
-                NodeData::Doctype { public_id, .. } => Some(public_id.clone()),
-                _ => None,
-            }).flatten().unwrap_or_default();
+            let val = dom
+                .with_node(NodeId::new(nid), |n| match &n.data {
+                    NodeData::Doctype { public_id, .. } => Some(public_id.clone()),
+                    _ => None,
+                })
+                .flatten()
+                .unwrap_or_default();
             serde_json::to_string(&val).unwrap_or("\"\"".into())
         }
         "element_children" => {
             let nid = arg1.parse::<u32>().unwrap_or(0);
-            let ids: Vec<i32> = dom.children(NodeId::new(nid)).iter()
+            let ids: Vec<i32> = dom
+                .children(NodeId::new(nid))
+                .iter()
                 .filter(|&&id| dom.get_node(id).map(|n| n.is_element()).unwrap_or(false))
-                .map(|id| id.index() as i32).collect();
+                .map(|id| id.index() as i32)
+                .collect();
             serde_json::to_string(&ids).unwrap_or("[]".into())
         }
         "has_child_nodes" => {
             let nid = arg1.parse::<u32>().unwrap_or(0);
-            dom.with_node(NodeId::new(nid), |n| n.first_child.is_some()).unwrap_or(false).to_string()
+            dom.with_node(NodeId::new(nid), |n| n.first_child.is_some())
+                .unwrap_or(false)
+                .to_string()
         }
         "contains" => {
             let nid = arg1.parse::<u32>().unwrap_or(0);
             let other = arg2.parse::<u32>().unwrap_or(0);
-            dom.descendants(NodeId::new(nid)).contains(&NodeId::new(other)).to_string()
+            dom.descendants(NodeId::new(nid))
+                .contains(&NodeId::new(other))
+                .to_string()
         }
         // Index of a node among its parent's children. Walks prev siblings in
         // Rust, avoiding the per-step JS->op round trips a Range comparison
@@ -497,8 +622,8 @@ static FETCH_CLIENT_CACHE: std::sync::OnceLock<
 /// connection pool actually warms up.
 pub fn cached_request_client(proxy_url: Option<&str>) -> Result<reqwest::Client, String> {
     let key = proxy_url.unwrap_or("").to_string();
-    let cache = FETCH_CLIENT_CACHE
-        .get_or_init(|| std::sync::RwLock::new(std::collections::HashMap::new()));
+    let cache =
+        FETCH_CLIENT_CACHE.get_or_init(|| std::sync::RwLock::new(std::collections::HashMap::new()));
     if let Ok(read) = cache.read() {
         if let Some(client) = read.get(&key) {
             return Ok(client.clone());
@@ -532,7 +657,9 @@ fn build_request_client(proxy_url: Option<&str>) -> Result<reqwest::Client, Stri
         .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_millis(timeout_ms))
         // SSRF guard: also reject hostnames that resolve to a private/loopback IP.
-        .dns_resolver(std::sync::Arc::new(obscura_net::SsrfGuardResolver::new(false)))
+        .dns_resolver(std::sync::Arc::new(obscura_net::SsrfGuardResolver::new(
+            false,
+        )))
         // Be explicit about pool size: default is unbounded which is fine,
         // but pool_idle_timeout default (90s) is short for SPA-heavy
         // workloads where the same origin is hit dozens of times across
@@ -564,7 +691,11 @@ async fn op_fetch_url(
     #[string] origin: String,
     #[string] mode: String,
 ) -> Result<String, deno_error::JsErrorBox> {
-    tracing::debug!("op_fetch_url called: {} {} (intercept check pending)", method, url);
+    tracing::debug!(
+        "op_fetch_url called: {} {} (intercept check pending)",
+        method,
+        url
+    );
 
     if let Ok(parsed_url) = url::Url::parse(&url) {
         if let Err(e) = validate_fetch_url(&parsed_url) {
@@ -575,7 +706,8 @@ async fn op_fetch_url(
                 "headers": {},
                 "blocked": true,
                 "error": e,
-            }).to_string());
+            })
+            .to_string());
         }
     }
 
@@ -591,7 +723,8 @@ async fn op_fetch_url(
                     "url": url,
                     "headers": {},
                     "blocked": true,
-                }).to_string());
+                })
+                .to_string());
             }
         }
         let jar = gs.cookie_jar.clone();
@@ -599,11 +732,20 @@ async fn op_fetch_url(
         // #139: thread the configured proxy through to the per-request
         // reqwest::Client. Without this, op_fetch_url silently bypasses
         // BrowserContext.proxy_url for every JS fetch() / XHR call.
-        let proxy_url = gs.http_client.as_ref().and_then(|c| c.proxy_url().map(|s| s.to_string()));
-        tracing::debug!("op_fetch_url: intercept_enabled={}, has_tx={}", gs.intercept_enabled, gs.intercept_tx.is_some());
+        let proxy_url = gs
+            .http_client
+            .as_ref()
+            .and_then(|c| c.proxy_url().map(|s| s.to_string()));
+        tracing::debug!(
+            "op_fetch_url: intercept_enabled={}, has_tx={}",
+            gs.intercept_enabled,
+            gs.intercept_tx.is_some()
+        );
         let itx = if gs.intercept_enabled {
             gs.intercept_counter += 1;
-            gs.intercept_tx.clone().map(|tx| (tx, format!("intercept-{}", gs.intercept_counter)))
+            gs.intercept_tx
+                .clone()
+                .map(|tx| (tx, format!("intercept-{}", gs.intercept_counter)))
         } else {
             None
         };
@@ -611,7 +753,8 @@ async fn op_fetch_url(
     };
 
     if let Some((tx, request_id)) = intercept_tx {
-        let custom_headers: HashMap<String, String> = serde_json::from_str(&headers_json).unwrap_or_default();
+        let custom_headers: HashMap<String, String> =
+            serde_json::from_str(&headers_json).unwrap_or_default();
         let (resolve_tx, resolve_rx) = tokio::sync::oneshot::channel();
         let intercepted = InterceptedRequest {
             request_id: request_id.clone(),
@@ -623,14 +766,19 @@ async fn op_fetch_url(
         };
         if tx.send(intercepted).is_ok() {
             match resolve_rx.await {
-                Ok(InterceptResolution::Fulfill { status, headers: h, body: b }) => {
+                Ok(InterceptResolution::Fulfill {
+                    status,
+                    headers: h,
+                    body: b,
+                }) => {
                     let resp_headers: HashMap<String, String> = h;
                     return Ok(serde_json::json!({
                         "status": status,
                         "body": b,
                         "url": url,
                         "headers": resp_headers,
-                    }).to_string());
+                    })
+                    .to_string());
                 }
                 Ok(InterceptResolution::Fail { reason }) => {
                     return Ok(serde_json::json!({
@@ -640,19 +788,24 @@ async fn op_fetch_url(
                         "headers": {},
                         "blocked": true,
                         "error": reason,
-                    }).to_string());
+                    })
+                    .to_string());
                 }
-                Ok(InterceptResolution::Continue { url: _new_url, method: _new_method, headers: _new_headers, body: _new_body }) => {
+                Ok(InterceptResolution::Continue {
+                    url: _new_url,
+                    method: _new_method,
+                    headers: _new_headers,
+                    body: _new_body,
+                }) => {
                     tracing::debug!("Interception: continue request {}", url);
                 }
-                Err(_) => {
-                }
+                Err(_) => {}
             }
         }
     }
 
-    let client = cached_request_client(proxy_url.as_deref())
-        .map_err(deno_error::JsErrorBox::generic)?;
+    let client =
+        cached_request_client(proxy_url.as_deref()).map_err(deno_error::JsErrorBox::generic)?;
 
     let request_origin = url::Url::parse(&url)
         .ok()
@@ -664,7 +817,11 @@ async fn op_fetch_url(
             }
         })
         .unwrap_or_default();
-    let page_origin = if origin.is_empty() { request_origin.clone() } else { origin.clone() };
+    let page_origin = if origin.is_empty() {
+        request_origin.clone()
+    } else {
+        origin.clone()
+    };
     let is_cross_origin = !page_origin.is_empty() && request_origin != page_origin;
 
     let req_method: reqwest::Method = method.parse().unwrap_or(reqwest::Method::GET);
@@ -679,7 +836,9 @@ async fn op_fetch_url(
             && req_method != reqwest::Method::POST
             || custom_headers.keys().any(|k| {
                 let kl = k.to_lowercase();
-                kl != "accept" && kl != "accept-language" && kl != "content-language"
+                kl != "accept"
+                    && kl != "accept-language"
+                    && kl != "content-language"
                     && kl != "content-type"
             }));
 
@@ -690,11 +849,17 @@ async fn op_fetch_url(
             .header("Access-Control-Request-Method", method.as_str())
             .header(
                 "Access-Control-Request-Headers",
-                custom_headers.keys().cloned().collect::<Vec<_>>().join(", "),
+                custom_headers
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", "),
             )
             .send()
             .await
-            .map_err(|e| deno_error::JsErrorBox::generic(format!("CORS preflight failed: {}", e)))?;
+            .map_err(|e| {
+                deno_error::JsErrorBox::generic(format!("CORS preflight failed: {}", e))
+            })?;
 
         let allowed_origin = preflight
             .headers()
@@ -739,7 +904,10 @@ async fn op_fetch_url(
         // Send a default User-Agent on fetch()/XHR requests (the navigation path
         // sets one, but this op did not, so scripted requests went out with no UA
         // and UA-gated servers rejected them). Honor an explicit override.
-        if !custom_headers.keys().any(|k| k.eq_ignore_ascii_case("user-agent")) {
+        if !custom_headers
+            .keys()
+            .any(|k| k.eq_ignore_ascii_case("user-agent"))
+        {
             req = req.header(
                 "User-Agent",
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
@@ -873,7 +1041,12 @@ async fn op_fetch_url(
     let resp_body = String::from_utf8_lossy(&resp_bytes).to_string();
     let resp_body_base64 = BASE64.encode(&resp_bytes);
 
-    tracing::debug!("op_fetch_url completed: {} {} ({} bytes)", method, url, resp_body.len());
+    tracing::debug!(
+        "op_fetch_url completed: {} {} ({} bytes)",
+        method,
+        url,
+        resp_body.len()
+    );
 
     Ok(serde_json::json!({
         "status": status,
@@ -1002,7 +1175,8 @@ async fn op_sleep(#[number] millis: u64) {
 fn op_binding_called(state: &OpState, #[string] name: &str, #[string] payload: &str) {
     let gs = state.borrow::<SharedState>().clone();
     let mut gs = gs.borrow_mut();
-    gs.pending_binding_calls.push((name.to_string(), payload.to_string()));
+    gs.pending_binding_calls
+        .push((name.to_string(), payload.to_string()));
 }
 
 /// Real WebCrypto `crypto.subtle.digest`. `algorithm` is the SubtleCrypto
@@ -1208,7 +1382,12 @@ fn op_encoding_for_label(#[string] label: &str) -> String {
 /// error). The UTF-8 non-fatal common case is handled in JS without this op.
 #[op2]
 #[string]
-fn op_text_decode(#[string] label: &str, #[buffer] bytes: &[u8], fatal: bool, ignore_bom: bool) -> String {
+fn op_text_decode(
+    #[string] label: &str,
+    #[buffer] bytes: &[u8],
+    fatal: bool,
+    ignore_bom: bool,
+) -> String {
     match obscura_net::decode_with_label(label, bytes, fatal, ignore_bom) {
         Some(s) => serde_json::json!({ "ok": true, "v": s }).to_string(),
         None => "{\"ok\":false}".to_string(),

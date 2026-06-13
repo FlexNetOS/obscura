@@ -13,9 +13,7 @@
 pub(crate) fn url_is_file_scheme(raw: &str) -> bool {
     url::Url::parse(raw)
         .map(|u| u.scheme().eq_ignore_ascii_case("file"))
-        .unwrap_or_else(|_| {
-            raw.trim_start().to_ascii_lowercase().starts_with("file:")
-        })
+        .unwrap_or_else(|_| raw.trim_start().to_ascii_lowercase().starts_with("file:"))
 }
 
 #[cfg(test)]

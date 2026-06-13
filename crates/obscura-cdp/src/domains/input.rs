@@ -13,8 +13,14 @@ pub async fn handle(
             let event_type = params.get("type").and_then(|v| v.as_str()).unwrap_or("");
             let x = params.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
             let y = params.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let _button = params.get("button").and_then(|v| v.as_str()).unwrap_or("left");
-            let _click_count = params.get("clickCount").and_then(|v| v.as_u64()).unwrap_or(1);
+            let _button = params
+                .get("button")
+                .and_then(|v| v.as_str())
+                .unwrap_or("left");
+            let _click_count = params
+                .get("clickCount")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(1);
 
             if event_type == "mousePressed" {
                 if let Some(page) = ctx.get_session_page_mut(session_id) {
@@ -54,7 +60,9 @@ pub async fn handle(
                         x = x, y = y,
                     );
                     page.evaluate(&code);
-                    page.process_pending_navigation().await.map_err(|e| e.to_string())?;
+                    page.process_pending_navigation()
+                        .await
+                        .map_err(|e| e.to_string())?;
                 }
             } else if event_type == "mouseReleased" {
                 if let Some(page) = ctx.get_session_page_mut(session_id) {
