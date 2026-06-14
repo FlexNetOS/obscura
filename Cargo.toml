@@ -15,7 +15,9 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-repository = "https://github.com/h4ckf0r0day/obscura"
+# FlexNetOS network-plane engine (lane↔obscura seam, ADR-0001).
+# Fork of upstream https://github.com/h4ckf0r0day/obscura (attribution preserved).
+repository = "https://github.com/FlexNetOS/obscura"
 
 [workspace.dependencies]
 obscura-dom = { path = "crates/obscura-dom" }
