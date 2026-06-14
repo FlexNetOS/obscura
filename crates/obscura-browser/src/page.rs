@@ -195,9 +195,10 @@ impl Page {
             // http://, which only works when the upstream happens to be a
             // Clash-style mixed-mode proxy and breaks plain SOCKS5 servers
             // like `ssh -ND` (#160).
-            Some(Arc::new(StealthHttpClient::with_proxy(
+            Some(Arc::new(StealthHttpClient::with_proxy_ca(
                 context.cookie_jar.clone(),
                 context.proxy_url.as_deref(),
+                context.ca_path.as_deref(),
             )))
         } else {
             None
@@ -277,9 +278,10 @@ impl Page {
         // and op_fetch_url so dynamic imports and JS fetch() honour the
         // configured upstream proxy (#139). When proxy_url is None this is
         // equivalent to with_base_url() (direct connection).
-        let mut rt = ObscuraJsRuntime::with_base_url_and_proxy(
+        let mut rt = ObscuraJsRuntime::with_base_url_proxy_ca(
             &self.url_string(),
             self.context.proxy_url.clone(),
+            self.context.ca_path.clone(),
         );
         rt.set_url(&self.url_string());
         rt.set_encoding(&self.encoding);

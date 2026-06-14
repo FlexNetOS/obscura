@@ -80,7 +80,7 @@ impl CdpContext {
         user_agent: Option<String>,
         storage_dir: Option<std::path::PathBuf>,
     ) -> Self {
-        Self::_new_inner(proxy, stealth, user_agent, storage_dir, false, false)
+        Self::_new_inner(proxy, stealth, user_agent, storage_dir, false, false, None)
     }
 
     pub fn new_with_security(
@@ -89,7 +89,15 @@ impl CdpContext {
         user_agent: Option<String>,
         allow_file_access: bool,
     ) -> Self {
-        Self::_new_inner(proxy, stealth, user_agent, None, allow_file_access, false)
+        Self::_new_inner(
+            proxy,
+            stealth,
+            user_agent,
+            None,
+            allow_file_access,
+            false,
+            None,
+        )
     }
 
     /// Kitchen-sink constructor that also threads `allow_private_network`
@@ -109,9 +117,35 @@ impl CdpContext {
             storage_dir,
             allow_file_access,
             allow_private_network,
+            None,
         )
     }
 
+    /// Like [`new_full`](Self::new_full) but also accepts a custom CA bundle
+    /// path (the lane governed-egress seam). `new_full` delegates here with
+    /// `ca_path = None` so existing callers are unaffected.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_full_ca(
+        proxy: Option<String>,
+        stealth: bool,
+        user_agent: Option<String>,
+        storage_dir: Option<std::path::PathBuf>,
+        allow_file_access: bool,
+        allow_private_network: bool,
+        ca_path: Option<String>,
+    ) -> Self {
+        Self::_new_inner(
+            proxy,
+            stealth,
+            user_agent,
+            storage_dir,
+            allow_file_access,
+            allow_private_network,
+            ca_path,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn _new_inner(
         proxy: Option<String>,
         stealth: bool,
@@ -119,14 +153,16 @@ impl CdpContext {
         storage_dir: Option<std::path::PathBuf>,
         allow_file_access: bool,
         allow_private_network: bool,
+        ca_path: Option<String>,
     ) -> Self {
-        let mut ctx = BrowserContext::with_storage_and_network(
+        let mut ctx = BrowserContext::with_storage_network_ca(
             "default".to_string(),
             proxy,
             stealth,
             user_agent,
             storage_dir,
             allow_private_network,
+            ca_path,
         );
         ctx.allow_file_access = allow_file_access;
         let default_context = Arc::new(ctx);

@@ -26,6 +26,18 @@ struct Args {
     #[arg(long, global = true)]
     proxy: Option<String>,
 
+    /// Path to a PEM CA bundle to ADD to the trust store of every egress
+    /// client (navigation, JS fetch/XHR, dynamic imports, and the stealth
+    /// client). Lets obscura run behind a TLS-terminating governed proxy
+    /// such as `lane`, which re-signs upstream certs with its own local CA.
+    /// This NEVER disables validation — the certs are added as extra trusted
+    /// roots, so normal public-CA TLS still verifies. If omitted, the
+    /// `LANE_CA` then `SSL_CERT_FILE` env vars are consulted (first present
+    /// wins). A configured-but-unreadable CA file fails the request loudly
+    /// (fail-closed); it never silently falls back to the default roots only.
+    #[arg(long, global = true, value_name = "PATH")]
+    ca: Option<String>,
+
     #[arg(long)]
     obey_robots: bool,
 
@@ -231,6 +243,21 @@ fn merge_proxy(global_proxy: Option<String>, command_proxy: Option<String>) -> O
     command_proxy.or(global_proxy)
 }
 
+/// Resolve the effective custom-CA bundle path.
+///
+/// Order (first non-empty wins): the explicit `--ca` flag, then the `LANE_CA`
+/// env var, then `SSL_CERT_FILE`. Empty / whitespace-only values are treated
+/// as unset so an exported-but-blank env var does not force a (missing) CA.
+/// Returns `None` when none are set, leaving the default root store in place.
+fn resolve_ca(cli_ca: Option<String>) -> Option<String> {
+    fn clean(s: Option<String>) -> Option<String> {
+        s.map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
+    }
+    clean(cli_ca)
+        .or_else(|| clean(std::env::var("LANE_CA").ok()))
+        .or_else(|| clean(std::env::var("SSL_CERT_FILE").ok()))
+}
+
 /// Normalize a raw `--v8-flags` value into the string we'll hand to V8.
 /// Returns `None` when the user didn't pass the flag, passed an empty string,
 /// or passed only whitespace; in those cases V8 is left untouched.
@@ -322,6 +349,10 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let global_proxy = args.proxy.clone();
+    // Resolve the custom CA once (flag → LANE_CA → SSL_CERT_FILE). Threaded
+    // into every command's browser/network construction so the same governed
+    // trust root applies across navigation, JS fetch, imports, and stealth.
+    let ca = resolve_ca(args.ca.clone());
 
     match args.command {
         Some(Command::Serve {
@@ -357,9 +388,9 @@ async fn main() -> anyhow::Result<()> {
 
             if workers > 1 {
                 tracing::info!("{} worker processes", workers);
-                run_multi_worker_serve(port, workers, proxy, stealth, user_agent).await?;
+                run_multi_worker_serve(port, workers, proxy, stealth, user_agent, ca).await?;
             } else {
-                obscura_cdp::start_with_full_serve_options(
+                obscura_cdp::start_with_serve_options_ca(
                     port,
                     &host,
                     proxy,
@@ -368,6 +399,7 @@ async fn main() -> anyhow::Result<()> {
                     allow_file_access,
                     storage_dir,
                     args.allow_private_network,
+                    ca,
                 )
                 .await?;
             }
@@ -401,6 +433,7 @@ async fn main() -> anyhow::Result<()> {
                 proxy: global_proxy,
                 storage_dir,
                 allow_private_network: args.allow_private_network,
+                ca,
             })
             .await?;
         }
@@ -420,6 +453,7 @@ async fn main() -> anyhow::Result<()> {
                 timeout,
                 quiet,
                 global_proxy,
+                ca,
             )
             .await?;
         }
@@ -433,9 +467,10 @@ async fn main() -> anyhow::Result<()> {
         }) => {
             let mcp_proxy = merge_proxy(global_proxy.clone(), proxy);
             if http {
-                obscura_mcp::http::run(host, port, mcp_proxy, user_agent, stealth).await?;
+                obscura_mcp::http::run_with_ca(host, port, mcp_proxy, user_agent, stealth, ca)
+                    .await?;
             } else {
-                obscura_mcp::run(mcp_proxy, user_agent, stealth).await?;
+                obscura_mcp::run_with_ca(mcp_proxy, user_agent, stealth, ca).await?;
             }
         }
         None => {
@@ -443,7 +478,18 @@ async fn main() -> anyhow::Result<()> {
             if let Some(ref proxy) = args.proxy {
                 tracing::info!("Using proxy: {}", proxy);
             }
-            obscura_cdp::start_with_options(args.port, args.proxy, false).await?;
+            obscura_cdp::start_with_serve_options_ca(
+                args.port,
+                "127.0.0.1",
+                args.proxy,
+                false,
+                None,
+                false,
+                None,
+                false,
+                ca,
+            )
+            .await?;
         }
     }
 
@@ -456,6 +502,7 @@ async fn run_multi_worker_serve(
     proxy: Option<String>,
     stealth: bool,
     user_agent: Option<String>,
+    ca: Option<String>,
 ) -> anyhow::Result<()> {
     use tokio::io::AsyncWriteExt as _;
     use tokio::net::TcpListener;
@@ -466,6 +513,11 @@ async fn run_multi_worker_serve(
     for i in 0..workers {
         let worker_port = port + 1 + i;
         let mut cmd = std::process::Command::new(&exe);
+        // `--ca` is a global flag: place it before the `serve` subcommand so
+        // each worker process trusts the same governed-proxy CA root.
+        if let Some(ref c) = ca {
+            cmd.arg("--ca").arg(c);
+        }
         cmd.arg("serve").arg("--port").arg(worker_port.to_string());
         if let Some(ref p) = proxy {
             cmd.arg("--proxy").arg(p);
@@ -590,6 +642,7 @@ struct RunFetchOpts {
     proxy: Option<String>,
     storage_dir: Option<std::path::PathBuf>,
     allow_private_network: bool,
+    ca: Option<String>,
 }
 
 async fn run_fetch(opts: RunFetchOpts) -> anyhow::Result<()> {
@@ -608,6 +661,7 @@ async fn run_fetch(opts: RunFetchOpts) -> anyhow::Result<()> {
         proxy,
         storage_dir,
         allow_private_network,
+        ca,
     } = opts;
     let url_str = url_str.as_str();
     let wait_until = wait_until.as_str();
@@ -622,18 +676,20 @@ async fn run_fetch(opts: RunFetchOpts) -> anyhow::Result<()> {
     // payloads (images, fonts, …) and any non-HTML resource where parsing the
     // body through the DOM/JS layer would corrupt or discard data.
     if dump == DumpFormat::Original {
-        let bytes = fetch_original_bytes(url_str, proxy, user_agent.clone(), timeout_secs).await?;
+        let bytes =
+            fetch_original_bytes(url_str, proxy, user_agent.clone(), timeout_secs, ca).await?;
         write_or_print_bytes(&bytes, output.as_ref()).await?;
         return Ok(());
     }
 
-    let context = Arc::new(BrowserContext::with_storage_and_network(
+    let context = Arc::new(BrowserContext::with_storage_network_ca(
         "fetch".to_string(),
         proxy,
         stealth,
         user_agent.clone(),
         storage_dir.clone(),
         allow_private_network,
+        ca,
     ));
     let mut page = Page::new("fetch-page".to_string(), context.clone());
 
@@ -748,13 +804,16 @@ async fn fetch_original_bytes(
     proxy: Option<String>,
     user_agent: Option<String>,
     timeout_secs: u64,
+    ca: Option<String>,
 ) -> anyhow::Result<Vec<u8>> {
     let url = url::Url::parse(url_str)
         .map_err(|e| anyhow::anyhow!("Invalid URL '{}': {}", url_str, e))?;
 
-    let client = obscura_net::ObscuraHttpClient::with_options(
+    let client = obscura_net::ObscuraHttpClient::with_options_ca(
         Arc::new(obscura_net::CookieJar::new()),
         proxy.as_deref(),
+        false,
+        ca.as_deref(),
     );
     if let Some(ua) = user_agent {
         client.set_user_agent(&ua).await;
@@ -942,6 +1001,7 @@ fn extract_readable_text(dom: &obscura_dom::DomTree, node_id: obscura_dom::NodeI
     result
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_parallel_scrape(
     urls: Vec<String>,
     eval: Option<String>,
@@ -950,6 +1010,7 @@ async fn run_parallel_scrape(
     timeout_secs: u64,
     quiet: bool,
     proxy: Option<String>,
+    ca: Option<String>,
 ) -> anyhow::Result<()> {
     let total = urls.len();
     let start = Instant::now();
@@ -996,6 +1057,7 @@ async fn run_parallel_scrape(
         let eval = eval.clone();
         let worker_path = worker_path.clone();
         let proxy = proxy.clone();
+        let ca = ca.clone();
 
         let handle = tokio::spawn(async move {
             let _permit = sem.acquire().await.unwrap();
@@ -1006,6 +1068,9 @@ async fn run_parallel_scrape(
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::null())
                 .env("OBSCURA_PROXY", proxy.as_deref().unwrap_or(""))
+                // Worker reads OBSCURA_CA to build its egress clients with the
+                // same governed-proxy trust root the parent resolved.
+                .env("OBSCURA_CA", ca.as_deref().unwrap_or(""))
                 .spawn()
             {
                 Ok(c) => c,
@@ -1321,8 +1386,8 @@ mod tests {
     use super::{
         effective_v8_flags, extract_assets, extract_readable_text, fetch_original_bytes,
         is_quiet_command, link_kind_from_rel, merge_proxy, normalize_v8_flags, resolve_asset_url,
-        select_log_filter, write_or_print, write_or_print_bytes, Args, Command, DumpFormat,
-        DEFAULT_V8_FLAGS,
+        resolve_ca, select_log_filter, write_or_print, write_or_print_bytes, Args, Command,
+        DumpFormat, DEFAULT_V8_FLAGS,
     };
     use clap::Parser;
     use obscura_dom::parse_html;
@@ -1378,7 +1443,7 @@ mod tests {
             .expect("seed temp PNG fixture");
 
         let file_url = format!("file://{}", path.display());
-        let bytes = fetch_original_bytes(&file_url, None, None, 5)
+        let bytes = fetch_original_bytes(&file_url, None, None, 5, None)
             .await
             .expect("fetch_original_bytes should round-trip the file body");
 
@@ -1680,6 +1745,56 @@ mod tests {
         let proxy = merge_proxy(Some("http://global.example:8080".to_string()), None);
 
         assert_eq!(proxy.as_deref(), Some("http://global.example:8080"));
+    }
+
+    #[test]
+    fn parsed_global_ca_flag_is_accepted_by_clap() {
+        // --ca is a GLOBAL arg, mirroring --proxy: it must parse before the
+        // subcommand and be visible on the top-level Args.
+        let args = Args::try_parse_from([
+            "obscura",
+            "--ca",
+            "/etc/obscura/lane-ca.pem",
+            "fetch",
+            "https://example.com",
+        ])
+        .expect("clap should accept --ca as a global arg before the subcommand");
+        assert_eq!(args.ca.as_deref(), Some("/etc/obscura/lane-ca.pem"));
+    }
+
+    #[test]
+    fn parsed_global_ca_flag_after_subcommand_is_accepted() {
+        // global=true means it also parses after the subcommand, like --proxy.
+        let args = Args::try_parse_from(["obscura", "serve", "--ca", "/tmp/ca.pem"])
+            .expect("clap should accept --ca after the subcommand (global)");
+        assert_eq!(args.ca.as_deref(), Some("/tmp/ca.pem"));
+    }
+
+    #[test]
+    fn ca_flag_default_is_none() {
+        let args = Args::try_parse_from(["obscura", "fetch", "https://example.com"])
+            .expect("clap should accept fetch without --ca");
+        assert!(args.ca.is_none());
+    }
+
+    #[test]
+    fn resolve_ca_prefers_the_explicit_flag() {
+        // When --ca is given, the env vars are never consulted, so this is a
+        // pure function of its input and safe to assert without touching env.
+        assert_eq!(
+            resolve_ca(Some("/flag/ca.pem".to_string())).as_deref(),
+            Some("/flag/ca.pem"),
+        );
+    }
+
+    #[test]
+    fn resolve_ca_treats_blank_flag_as_unset() {
+        // A whitespace-only flag value must not be taken as a (missing) CA path;
+        // it falls through to the env lookup (absent here in the common case).
+        let resolved = resolve_ca(Some("   ".to_string()));
+        // Either None, or whatever the ambient env happens to define — but never
+        // the blank string itself.
+        assert_ne!(resolved.as_deref(), Some("   "));
     }
 
     #[test]

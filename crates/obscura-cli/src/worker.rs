@@ -58,10 +58,20 @@ async fn main() {
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
-    let context = Arc::new(BrowserContext::with_options(
+    // Custom CA trust, threaded from the parent `scrape` process via env so
+    // the worker's egress clients trust the same governed-proxy root.
+    let ca = std::env::var("OBSCURA_CA")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let context = Arc::new(BrowserContext::with_storage_network_ca(
         "worker".to_string(),
         proxy,
         false,
+        None,
+        None,
+        false,
+        ca,
     ));
     let mut page = Page::new("page-1".to_string(), context);
 

@@ -68,11 +68,24 @@ pub async fn run(
     user_agent: Option<String>,
     stealth: bool,
 ) -> Result<()> {
+    run_with_ca(host, port, proxy, user_agent, stealth, None).await
+}
+
+/// Like [`run`] but also threads a custom CA bundle path (the lane
+/// governed-egress seam). `run` delegates here with `ca = None`.
+pub async fn run_with_ca(
+    host: String,
+    port: u16,
+    proxy: Option<String>,
+    user_agent: Option<String>,
+    stealth: bool,
+    ca: Option<String>,
+) -> Result<()> {
     let addr: std::net::SocketAddr = format!("{}:{}", host, port).parse()?;
     let listener = TcpListener::bind(&addr).await?;
     tracing::info!("MCP HTTP server on http://{}:{}/mcp", host, port);
 
-    let mut state = BrowserState::new(proxy, user_agent, stealth);
+    let mut state = BrowserState::new_with_ca(proxy, user_agent, stealth, ca);
     let allowed_origins = allowed_origins_env();
 
     loop {

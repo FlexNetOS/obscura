@@ -30,18 +30,25 @@ pub struct BrowserContext {
     /// models: file:// is a local file-system read, while private-network is
     /// the broader SSRF gate from issue #4.
     pub allow_private_network: bool,
+    /// Path to a PEM CA bundle whose certs are ADDED to the trust store of
+    /// every egress client this context builds (the http client, plus the
+    /// JS-side fetch/module-loader clients via `ObscuraHttpClient::ca_path`).
+    /// Set via the global `--ca` flag (or `LANE_CA` / `SSL_CERT_FILE`). Lets
+    /// obscura run behind a TLS-terminating governed proxy such as `lane`.
+    /// Never weakens validation — it only widens the trusted-root set.
+    pub ca_path: Option<String>,
 }
 
 impl BrowserContext {
     pub fn new(id: String) -> Self {
-        Self::_new_inner(id, None, false, None, None, false)
+        Self::_new_inner(id, None, false, None, None, false, None)
     }
 
     /// Create a BrowserContext with an optional storage directory.
     /// When `storage_dir` is set, cookies are automatically loaded from
     /// `{storage_dir}/cookies.json` on creation.
     pub fn with_storage(id: String, storage_dir: Option<PathBuf>) -> Self {
-        Self::_new_inner(id, None, false, None, storage_dir, false)
+        Self::_new_inner(id, None, false, None, storage_dir, false, None)
     }
 
     /// Create a BrowserContext with full options including storage_dir.
@@ -52,7 +59,7 @@ impl BrowserContext {
         user_agent: Option<String>,
         storage_dir: Option<PathBuf>,
     ) -> Self {
-        Self::_new_inner(id, proxy_url, stealth, user_agent, storage_dir, false)
+        Self::_new_inner(id, proxy_url, stealth, user_agent, storage_dir, false, None)
     }
 
     /// Variant that also accepts the `allow_private_network` opt-in. All
@@ -73,9 +80,35 @@ impl BrowserContext {
             user_agent,
             storage_dir,
             allow_private_network,
+            None,
         )
     }
 
+    /// Kitchen-sink constructor that also accepts a custom CA bundle path (the
+    /// lane governed-egress seam). All older constructors delegate here with
+    /// `ca_path = None`, so existing callers are unaffected.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_storage_network_ca(
+        id: String,
+        proxy_url: Option<String>,
+        stealth: bool,
+        user_agent: Option<String>,
+        storage_dir: Option<PathBuf>,
+        allow_private_network: bool,
+        ca_path: Option<String>,
+    ) -> Self {
+        Self::_new_inner(
+            id,
+            proxy_url,
+            stealth,
+            user_agent,
+            storage_dir,
+            allow_private_network,
+            ca_path,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn _new_inner(
         id: String,
         proxy_url: Option<String>,
@@ -83,6 +116,7 @@ impl BrowserContext {
         user_agent: Option<String>,
         storage_dir: Option<PathBuf>,
         allow_private_network: bool,
+        ca_path: Option<String>,
     ) -> Self {
         let cookie_jar = Arc::new(CookieJar::new());
 
@@ -106,10 +140,11 @@ impl BrowserContext {
             }
         }
 
-        let mut client = ObscuraHttpClient::with_full_options(
+        let mut client = ObscuraHttpClient::with_options_ca(
             cookie_jar.clone(),
             proxy_url.as_deref(),
             allow_private_network,
+            ca_path.as_deref(),
         );
         if stealth {
             client.block_trackers = true;
@@ -141,6 +176,7 @@ impl BrowserContext {
             allow_file_access: false,
             storage_dir,
             allow_private_network,
+            ca_path,
         }
     }
 
@@ -154,7 +190,7 @@ impl BrowserContext {
         stealth: bool,
         user_agent: Option<String>,
     ) -> Self {
-        Self::_new_inner(id, proxy_url, stealth, user_agent, None, false)
+        Self::_new_inner(id, proxy_url, stealth, user_agent, None, false, None)
     }
 
     pub fn with_proxy(id: String, proxy_url: Option<String>) -> Self {

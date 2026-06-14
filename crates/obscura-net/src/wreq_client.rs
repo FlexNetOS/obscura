@@ -36,6 +36,19 @@ impl StealthHttpClient {
     }
 
     pub fn with_proxy(cookie_jar: Arc<CookieJar>, proxy_url: Option<&str>) -> Self {
+        Self::with_proxy_ca(cookie_jar, proxy_url, None)
+    }
+
+    /// Stealth-client constructor that also accepts a custom CA bundle path
+    /// (the lane governed-egress seam). The certs are ADDED to a cert store
+    /// seeded from the system default roots, so the stealth/TLS-impersonation
+    /// path trusts the governed proxy exactly as the plain client does without
+    /// dropping the default trust anchors. `None` preserves prior behaviour.
+    pub fn with_proxy_ca(
+        cookie_jar: Arc<CookieJar>,
+        proxy_url: Option<&str>,
+        ca_path: Option<&str>,
+    ) -> Self {
         let emulation_opts = wreq_util::Emulation::builder()
             .profile(wreq_util::Profile::Chrome145)
             .platform(wreq_util::Platform::Linux)
@@ -50,6 +63,24 @@ impl StealthHttpClient {
             if let Ok(p) = wreq::Proxy::all(proxy) {
                 builder = builder.proxy(p);
             }
+        }
+
+        // Custom CA trust: build a cert store from the system default roots
+        // PLUS the certs in the configured PEM bundle, then install it.
+        // `tls_cert_store` REPLACES the store, so we must re-seed the defaults
+        // via `set_default_paths()` (which also honours SSL_CERT_FILE/DIR) to
+        // avoid silently dropping the public roots. Fail-closed: a bad CA file
+        // panics here exactly as a bad proxy/emulation config would, matching
+        // this constructor's existing `expect`-based error model.
+        if let Some(ca) = ca_path {
+            let pem = std::fs::read(ca)
+                .unwrap_or_else(|e| panic!("failed to read stealth CA bundle '{ca}': {e}"));
+            let store = wreq::tls::trust::CertStore::builder()
+                .set_default_paths()
+                .add_pem_certs([pem.as_slice()])
+                .build()
+                .unwrap_or_else(|e| panic!("invalid stealth CA bundle '{ca}': {e}"));
+            builder = builder.tls_cert_store(store);
         }
 
         let client = builder

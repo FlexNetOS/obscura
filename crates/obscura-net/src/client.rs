@@ -255,9 +255,46 @@ async fn fetch_file_url(url: &Url) -> Result<Response, ObscuraNetError> {
     })
 }
 
+/// Load every certificate from a PEM CA bundle at `path` into reqwest
+/// `Certificate`s, ready to be registered as extra trusted roots.
+///
+/// Fail-closed: a missing file, an unreadable file, or a file with no valid
+/// PEM certificate all return an `Err`. This is intentional — a deployment
+/// that configured a CA but cannot load it must surface the error, never
+/// silently proceed with the default root store only (the lane governed-egress
+/// seam relies on the custom root actually being trusted).
+///
+/// Validation is NOT weakened: these certs are *added* to the trust anchor
+/// set. `danger_accept_invalid_certs` stays `false` on the client builder.
+pub fn load_ca_certs(path: &str) -> Result<Vec<reqwest::Certificate>, ObscuraNetError> {
+    let pem = std::fs::read(path)
+        .map_err(|e| ObscuraNetError::Network(format!("failed to read CA bundle '{path}': {e}")))?;
+
+    // reqwest 0.12 parses a whole bundle (one or many concatenated PEM blocks)
+    // in one call. Each `-----BEGIN CERTIFICATE-----` block becomes one cert.
+    let certs = reqwest::Certificate::from_pem_bundle(&pem)
+        .map_err(|e| ObscuraNetError::Network(format!("invalid CA bundle '{path}': {e}")))?;
+
+    if certs.is_empty() {
+        return Err(ObscuraNetError::Network(format!(
+            "CA bundle '{path}' contained no certificates"
+        )));
+    }
+
+    Ok(certs)
+}
+
 pub struct ObscuraHttpClient {
     client: tokio::sync::OnceCell<Client>,
     proxy_url: Option<String>,
+    /// Path to a PEM CA bundle whose certificates are ADDED to the client's
+    /// trust store (issue: lane governed-egress seam). When set, every cert in
+    /// the file is loaded via `reqwest::Certificate` and registered as an extra
+    /// trusted root. This never weakens validation: `danger_accept_invalid_certs`
+    /// stays `false`; we are widening the trust anchor set, not disabling checks.
+    /// Lets obscura run behind a TLS-terminating governed proxy (e.g. `lane`)
+    /// that re-signs upstream certs with its own local CA.
+    ca_path: Option<String>,
     pub cookie_jar: Arc<CookieJar>,
     pub user_agent: RwLock<String>,
     pub extra_headers: RwLock<HashMap<String, String>>,
@@ -291,9 +328,24 @@ impl ObscuraHttpClient {
         proxy_url: Option<&str>,
         allow_private_network: bool,
     ) -> Self {
+        Self::with_options_ca(cookie_jar, proxy_url, allow_private_network, None)
+    }
+
+    /// Kitchen-sink constructor that also accepts a custom CA bundle path
+    /// (the lane governed-egress seam). Older constructors delegate here with
+    /// `ca_path = None`, so existing callers are unaffected. When `ca_path` is
+    /// `Some`, the certs in that PEM file are added to the trust store the first
+    /// time the underlying reqwest client is built (see `get_client`).
+    pub fn with_options_ca(
+        cookie_jar: Arc<CookieJar>,
+        proxy_url: Option<&str>,
+        allow_private_network: bool,
+        ca_path: Option<&str>,
+    ) -> Self {
         ObscuraHttpClient {
             client: tokio::sync::OnceCell::new(),
             proxy_url: proxy_url.map(|s| s.to_string()),
+            ca_path: ca_path.map(|s| s.to_string()),
             cookie_jar,
             user_agent: RwLock::new(
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36".to_string(),
@@ -309,9 +361,9 @@ impl ObscuraHttpClient {
         }
     }
 
-    async fn get_client(&self) -> &Client {
+    async fn get_client(&self) -> Result<&Client, ObscuraNetError> {
         self.client
-            .get_or_init(|| async {
+            .get_or_try_init(|| async {
                 let mut builder = Client::builder()
                     .redirect(Policy::none())
                     .timeout(Duration::from_secs(30))
@@ -325,7 +377,19 @@ impl ObscuraHttpClient {
                     }
                 }
 
-                builder.build().expect("failed to build HTTP client")
+                // Custom CA trust: load the PEM bundle and register each cert as
+                // an extra trusted root. Fail-closed on a missing/invalid file —
+                // a governed-egress deployment that asked for a CA but cannot load
+                // it must NOT silently fall back to the default roots only.
+                if let Some(ref path) = self.ca_path {
+                    for cert in load_ca_certs(path)? {
+                        builder = builder.add_root_certificate(cert);
+                    }
+                }
+
+                builder.build().map_err(|e| {
+                    ObscuraNetError::Network(format!("failed to build HTTP client: {e}"))
+                })
             })
             .await
     }
@@ -336,6 +400,15 @@ impl ObscuraHttpClient {
     /// requests through the same upstream proxy.
     pub fn proxy_url(&self) -> Option<&str> {
         self.proxy_url.as_deref()
+    }
+
+    /// Read-only accessor for the custom CA bundle path the client was
+    /// configured with (if any). Mirrors [`proxy_url`](Self::proxy_url) so
+    /// callers that build their OWN reqwest client off this client's config —
+    /// notably `op_fetch_url` in `obscura-js` — route requests through the same
+    /// trusted-root set, not just the same proxy.
+    pub fn ca_path(&self) -> Option<&str> {
+        self.ca_path.as_deref()
     }
 
     pub async fn fetch(&self, url: &Url) -> Result<Response, ObscuraNetError> {
@@ -499,7 +572,7 @@ impl ObscuraHttpClient {
 
             let mut req_builder = self
                 .get_client()
-                .await
+                .await?
                 .request(method.clone(), current_url.as_str())
                 .headers(headers);
 
@@ -712,5 +785,216 @@ mod ssrf_tests {
                 "example.com wrongly SSRF-blocked: {e}"
             ),
         }
+    }
+}
+
+// Custom-CA trust (the lane↔obscura governed-egress seam). These tests prove
+// the real capability: obscura can be told to trust a custom CA and then
+// successfully complete TLS to a server signed by it — WITHOUT weakening
+// validation (the no-CA case must still fail with a cert error).
+#[cfg(test)]
+mod ca_trust_tests {
+    use super::{load_ca_certs, ObscuraHttpClient};
+    use crate::cookies::CookieJar;
+    use std::io::Write;
+    use std::sync::Arc;
+    use url::Url;
+
+    // ---- Unit tests for the PEM loader (fail-closed contract) ----
+
+    #[test]
+    fn load_ca_certs_loads_a_valid_self_signed_pem() {
+        let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(cert.cert.pem().as_bytes()).unwrap();
+        f.flush().unwrap();
+
+        let certs = load_ca_certs(f.path().to_str().unwrap())
+            .expect("a valid PEM CA must load without error");
+        assert_eq!(certs.len(), 1, "exactly one cert in the bundle");
+    }
+
+    #[test]
+    fn load_ca_certs_loads_a_multi_cert_bundle() {
+        let a = rcgen::generate_simple_self_signed(vec!["a.test".to_string()]).unwrap();
+        let b = rcgen::generate_simple_self_signed(vec!["b.test".to_string()]).unwrap();
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        write!(f, "{}{}", a.cert.pem(), b.cert.pem()).unwrap();
+        f.flush().unwrap();
+
+        let certs = load_ca_certs(f.path().to_str().unwrap()).expect("multi-cert bundle must load");
+        assert_eq!(certs.len(), 2, "both certs in the bundle are parsed");
+    }
+
+    #[test]
+    fn load_ca_certs_errors_on_missing_file() {
+        let err = load_ca_certs("/nonexistent/obscura-ca-does-not-exist.pem")
+            .expect_err("a missing CA file must error (fail-closed)");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("failed to read CA bundle"),
+            "error should name the read failure: {msg}"
+        );
+    }
+
+    #[test]
+    fn load_ca_certs_errors_on_garbage_pem() {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(b"this is not a certificate at all").unwrap();
+        f.flush().unwrap();
+
+        let err = load_ca_certs(f.path().to_str().unwrap())
+            .expect_err("an invalid PEM must error (fail-closed)");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("invalid CA bundle") || msg.contains("contained no certificates"),
+            "error should explain the bad bundle: {msg}"
+        );
+    }
+
+    // ---- Real localhost HTTPS round-trip (does CA trust actually work?) ----
+
+    /// Spin a one-shot HTTPS server on loopback whose leaf is `cert`/`key`,
+    /// returning the bound port. The server answers a single request with
+    /// `200 OK\r\n\r\nhello-ca`, then exits.
+    async fn spawn_https_server(cert_pem: String, key_pem: String) -> u16 {
+        use http_body_util::Full;
+        use hyper::body::Bytes;
+        use hyper::service::service_fn;
+        use hyper_util::rt::TokioIo;
+        use tokio::net::TcpListener;
+        use tokio_rustls::rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
+        use tokio_rustls::rustls::ServerConfig;
+        use tokio_rustls::TlsAcceptor;
+
+        let certs: Vec<CertificateDer<'static>> =
+            CertificateDer::pem_slice_iter(cert_pem.as_bytes())
+                .collect::<Result<_, _>>()
+                .unwrap();
+        let key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes()).unwrap();
+
+        // reqwest's rustls-tls backend uses the `ring` provider; install it as
+        // the process default so the test server's ServerConfig builder can
+        // resolve a CryptoProvider too (ignore the error if already installed).
+        let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
+
+        let mut config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)
+            .unwrap();
+        config.alpn_protocols = vec![b"http/1.1".to_vec()];
+        let acceptor = TlsAcceptor::from(Arc::new(config));
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        tokio::spawn(async move {
+            // Serve a handful of connections so both the with-CA and without-CA
+            // probes (and any TLS retry) are answered; the test completes well
+            // before this loop would idle out.
+            for _ in 0..8 {
+                let (stream, _) = match listener.accept().await {
+                    Ok(v) => v,
+                    Err(_) => break,
+                };
+                let acceptor = acceptor.clone();
+                tokio::spawn(async move {
+                    let tls = match acceptor.accept(stream).await {
+                        Ok(t) => t,
+                        // A client that does NOT trust the CA aborts the
+                        // handshake here — expected for the negative probe.
+                        Err(_) => return,
+                    };
+                    let io = TokioIo::new(tls);
+                    let svc = service_fn(|_req| async {
+                        Ok::<_, std::convert::Infallible>(hyper::Response::new(Full::new(
+                            Bytes::from_static(b"hello-ca"),
+                        )))
+                    });
+                    let _ = hyper::server::conn::http1::Builder::new()
+                        .serve_connection(io, svc)
+                        .await;
+                });
+            }
+        });
+
+        port
+    }
+
+    #[tokio::test]
+    async fn custom_ca_is_trusted_and_validation_stays_enforced() {
+        // Mint a self-signed cert for `localhost`. It is both the leaf the
+        // server presents AND the root we ask obscura to trust.
+        let issued = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
+        let cert_pem = issued.cert.pem();
+        let key_pem = issued.key_pair.serialize_pem();
+
+        let port = spawn_https_server(cert_pem.clone(), key_pem).await;
+        // Give the listener a moment to be ready.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let url = Url::parse(&format!("https://localhost:{port}/")).unwrap();
+
+        // Write the CA to a PEM file obscura will load.
+        let mut ca_file = tempfile::NamedTempFile::new().unwrap();
+        ca_file.write_all(cert_pem.as_bytes()).unwrap();
+        ca_file.flush().unwrap();
+        let ca_path = ca_file.path().to_str().unwrap().to_string();
+
+        // (1) WITHOUT the custom CA: the fetch must FAIL with a TLS/cert error.
+        // This proves we did NOT accidentally disable validation. The server is
+        // on loopback, so allow_private_network=true to clear the SSRF guard and
+        // isolate the TLS behaviour as the only variable.
+        let no_ca = ObscuraHttpClient::with_options_ca(
+            Arc::new(CookieJar::new()),
+            None,
+            true, // allow_private_network (loopback target)
+            None, // no custom CA
+        );
+        let without = no_ca.fetch(&url).await;
+        assert!(
+            without.is_err(),
+            "fetch WITHOUT the custom CA must fail (validation enforced); got {without:?}"
+        );
+
+        // (2) WITH the custom CA configured: the same fetch must SUCCEED.
+        let with_ca = ObscuraHttpClient::with_options_ca(
+            Arc::new(CookieJar::new()),
+            None,
+            true,
+            Some(&ca_path),
+        );
+        let resp = with_ca
+            .fetch(&url)
+            .await
+            .expect("fetch WITH the custom CA must succeed");
+        assert_eq!(resp.status, 200, "served 200 over the trusted TLS channel");
+        assert_eq!(
+            String::from_utf8_lossy(&resp.body),
+            "hello-ca",
+            "round-trip body proves real CA-trusted TLS, not a bypass"
+        );
+    }
+
+    #[tokio::test]
+    async fn bogus_ca_path_fails_closed_on_fetch() {
+        // A configured-but-unreadable CA must fail the request loudly, never
+        // silently fall back to the default root store.
+        let client = ObscuraHttpClient::with_options_ca(
+            Arc::new(CookieJar::new()),
+            None,
+            true,
+            Some("/nonexistent/obscura-bogus-ca.pem"),
+        );
+        // example.com is a normally-trusted public host; the ONLY reason this
+        // must error is the unreadable CA file (fail-closed). Tolerate a
+        // no-network sandbox: a DNS/connect failure is also an Err, which still
+        // satisfies "the request did not silently succeed without the CA".
+        let url = Url::parse("https://example.com/").unwrap();
+        let res = client.fetch(&url).await;
+        assert!(
+            res.is_err(),
+            "a bogus CA path must fail-closed; got {res:?}"
+        );
     }
 }

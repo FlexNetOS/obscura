@@ -626,8 +626,13 @@ static FETCH_CLIENT_CACHE: std::sync::OnceLock<
 /// loader for dynamic imports). Keyed by proxy URL ("" = direct).
 /// One client per distinct proxy, reused for every request, so the
 /// connection pool actually warms up.
-pub fn cached_request_client(proxy_url: Option<&str>) -> Result<reqwest::Client, String> {
-    let key = proxy_url.unwrap_or("").to_string();
+pub fn cached_request_client(
+    proxy_url: Option<&str>,
+    ca_path: Option<&str>,
+) -> Result<reqwest::Client, String> {
+    // Key on BOTH proxy and CA so a request that needs a custom trust root
+    // never reuses a client built without it (and vice versa). "" = none.
+    let key = format!("{}\u{0}{}", proxy_url.unwrap_or(""), ca_path.unwrap_or(""));
     let cache =
         FETCH_CLIENT_CACHE.get_or_init(|| std::sync::RwLock::new(std::collections::HashMap::new()));
     if let Ok(read) = cache.read() {
@@ -635,14 +640,17 @@ pub fn cached_request_client(proxy_url: Option<&str>) -> Result<reqwest::Client,
             return Ok(client.clone());
         }
     }
-    let client = build_request_client(proxy_url)?;
+    let client = build_request_client(proxy_url, ca_path)?;
     if let Ok(mut write) = cache.write() {
         write.entry(key).or_insert_with(|| client.clone());
     }
     Ok(client)
 }
 
-fn build_request_client(proxy_url: Option<&str>) -> Result<reqwest::Client, String> {
+fn build_request_client(
+    proxy_url: Option<&str>,
+    ca_path: Option<&str>,
+) -> Result<reqwest::Client, String> {
     // Redirects are followed manually below so each hop can be re-validated
     // against the same SSRF policy as the initial URL (GHSA-8v6v-g4rh-jmcm).
     // With reqwest's default auto-follow, an attacker-controlled origin can
@@ -676,6 +684,15 @@ fn build_request_client(proxy_url: Option<&str>) -> Result<reqwest::Client, Stri
         let p = reqwest::Proxy::all(proxy)
             .map_err(|e| format!("Invalid op_fetch_url proxy '{}': {}", proxy, e))?;
         builder = builder.proxy(p);
+    }
+    // Custom CA trust for the JS-side fetch/XHR path. Mirrors the same trust
+    // root the page's ObscuraHttpClient was given so a governed proxy (lane)
+    // is trusted for JS fetch()/XHR exactly as for navigation. Fail-closed on
+    // a bad CA file — never silently drop the requested trust anchor.
+    if let Some(ca) = ca_path {
+        for cert in obscura_net::load_ca_certs(ca).map_err(|e| e.to_string())? {
+            builder = builder.add_root_certificate(cert);
+        }
     }
     builder
         .build()
@@ -717,7 +734,7 @@ async fn op_fetch_url(
         }
     }
 
-    let (cookie_jar, in_flight, intercept_tx, proxy_url) = {
+    let (cookie_jar, in_flight, intercept_tx, proxy_url, ca_path) = {
         let state_borrow = state.borrow();
         let gs = state_borrow.borrow::<SharedState>().clone();
         let mut gs = gs.borrow_mut();
@@ -742,6 +759,12 @@ async fn op_fetch_url(
             .http_client
             .as_ref()
             .and_then(|c| c.proxy_url().map(|s| s.to_string()));
+        // Thread the configured custom CA the same way as the proxy so the
+        // JS-side fetch client trusts the same governed-proxy root (lane seam).
+        let ca_path = gs
+            .http_client
+            .as_ref()
+            .and_then(|c| c.ca_path().map(|s| s.to_string()));
         tracing::debug!(
             "op_fetch_url: intercept_enabled={}, has_tx={}",
             gs.intercept_enabled,
@@ -755,7 +778,7 @@ async fn op_fetch_url(
         } else {
             None
         };
-        (jar, in_flight, itx, proxy_url)
+        (jar, in_flight, itx, proxy_url, ca_path)
     };
 
     if let Some((tx, request_id)) = intercept_tx {
@@ -810,8 +833,8 @@ async fn op_fetch_url(
         }
     }
 
-    let client =
-        cached_request_client(proxy_url.as_deref()).map_err(deno_error::JsErrorBox::generic)?;
+    let client = cached_request_client(proxy_url.as_deref(), ca_path.as_deref())
+        .map_err(deno_error::JsErrorBox::generic)?;
 
     let request_origin = url::Url::parse(&url)
         .ok()

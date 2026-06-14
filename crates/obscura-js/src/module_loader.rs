@@ -14,6 +14,10 @@ pub struct ObscuraModuleLoader {
     /// `None` keeps the pre-#139 direct-connection behaviour for callers
     /// that haven't been updated.
     pub proxy_url: Option<String>,
+    /// Custom CA bundle path threaded through to every dynamic ES-module
+    /// fetch so imports are trusted against the same governed-proxy root
+    /// (lane seam) as navigation and JS fetch(). `None` = default roots only.
+    pub ca_path: Option<String>,
 }
 
 impl ObscuraModuleLoader {
@@ -22,9 +26,18 @@ impl ObscuraModuleLoader {
     }
 
     pub fn with_proxy(base_url: &str, proxy_url: Option<String>) -> Self {
+        Self::with_proxy_ca(base_url, proxy_url, None)
+    }
+
+    pub fn with_proxy_ca(
+        base_url: &str,
+        proxy_url: Option<String>,
+        ca_path: Option<String>,
+    ) -> Self {
         ObscuraModuleLoader {
             base_url: base_url.to_string(),
             proxy_url,
+            ca_path,
         }
     }
 }
@@ -61,9 +74,10 @@ impl ModuleLoader for ObscuraModuleLoader {
         _requested_module_type: RequestedModuleType,
     ) -> ModuleLoadResponse {
         let url = module_specifier.to_string();
-        // Capture the loader's proxy here so the async closure below owns a
-        // plain Option<String> rather than borrowing &self across an `await`.
+        // Capture the loader's proxy/CA here so the async closure below owns
+        // plain Option<String>s rather than borrowing &self across an `await`.
         let proxy_url = self.proxy_url.clone();
+        let ca_path = self.ca_path.clone();
 
         ModuleLoadResponse::Async(Pin::from(Box::new(async move {
             // Reuse the process-wide cached client (same one op_fetch_url
@@ -73,7 +87,9 @@ impl ModuleLoader for ObscuraModuleLoader {
             // every chunk. The cache means the first import on a given
             // proxy pays the build cost once and every chunk after reuses
             // the same warm pool.
-            let client = crate::ops::cached_request_client(proxy_url.as_deref()).map_err(io_err)?;
+            let client =
+                crate::ops::cached_request_client(proxy_url.as_deref(), ca_path.as_deref())
+                    .map_err(io_err)?;
 
             tracing::debug!(
                 "Loading ES module: {} (proxy: {})",

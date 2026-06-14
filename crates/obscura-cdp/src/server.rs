@@ -134,6 +134,35 @@ pub async fn start_with_full_serve_options(
     storage_dir: Option<std::path::PathBuf>,
     allow_private_network: bool,
 ) -> anyhow::Result<()> {
+    start_with_serve_options_ca(
+        port,
+        host,
+        proxy,
+        stealth,
+        user_agent,
+        allow_file_access,
+        storage_dir,
+        allow_private_network,
+        None,
+    )
+    .await
+}
+
+/// Full serve entry point that also threads a custom CA bundle path (the lane
+/// governed-egress seam). `start_with_full_serve_options` delegates here with
+/// `ca_path = None` so the existing public API is unchanged.
+#[allow(clippy::too_many_arguments)]
+pub async fn start_with_serve_options_ca(
+    port: u16,
+    host: &str,
+    proxy: Option<String>,
+    stealth: bool,
+    user_agent: Option<String>,
+    allow_file_access: bool,
+    storage_dir: Option<std::path::PathBuf>,
+    allow_private_network: bool,
+    ca_path: Option<String>,
+) -> anyhow::Result<()> {
     let ip: std::net::IpAddr = host
         .parse()
         .map_err(|e| anyhow::anyhow!("invalid --host '{}': {}", host, e))?;
@@ -201,6 +230,7 @@ pub async fn start_with_full_serve_options(
                 allow_file_access,
                 storage_dir,
                 allow_private_network,
+                ca_path,
                 shutdown_flag,
                 shutdown_notify.clone(),
             ));
@@ -367,16 +397,18 @@ async fn cdp_processor(
     allow_file_access: bool,
     storage_dir: Option<std::path::PathBuf>,
     allow_private_network: bool,
+    ca_path: Option<String>,
     shutdown_flag: Arc<AtomicBool>,
     shutdown_notify: Arc<Notify>,
 ) {
-    let mut ctx = CdpContext::new_full(
+    let mut ctx = CdpContext::new_full_ca(
         proxy,
         stealth,
         user_agent,
         storage_dir,
         allow_file_access,
         allow_private_network,
+        ca_path,
     );
     let (itx, irx) = mpsc::unbounded_channel::<obscura_js::ops::InterceptedRequest>();
     ctx.intercept_tx = Some(itx);
