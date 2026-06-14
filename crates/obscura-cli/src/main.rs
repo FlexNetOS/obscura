@@ -386,22 +386,22 @@ async fn main() -> anyhow::Result<()> {
             quiet,
             storage_dir,
         }) => {
-            run_fetch(
-                &url,
+            run_fetch(RunFetchOpts {
+                url_str: url,
                 dump,
                 selector,
-                wait,
-                timeout,
-                &wait_until,
+                wait_secs: wait,
+                timeout_secs: timeout,
+                wait_until,
                 user_agent,
                 stealth,
                 eval,
                 output,
                 quiet,
-                global_proxy,
+                proxy: global_proxy,
                 storage_dir,
-                args.allow_private_network,
-            )
+                allow_private_network: args.allow_private_network,
+            })
             .await?;
         }
         Some(Command::Scrape {
@@ -571,13 +571,17 @@ async fn run_multi_worker_serve(
     }
 }
 
-async fn run_fetch(
-    url_str: &str,
+/// All inputs to [`run_fetch`]. Bundled into a struct because the `fetch`
+/// subcommand carries enough independent options to trip
+/// `clippy::too_many_arguments`; grouping them keeps the single call site
+/// (the CLI dispatch) readable without changing any behavior.
+struct RunFetchOpts {
+    url_str: String,
     dump: Option<DumpFormat>,
     selector: Option<String>,
     wait_secs: u64,
     timeout_secs: u64,
-    wait_until: &str,
+    wait_until: String,
     user_agent: Option<String>,
     stealth: bool,
     eval: Option<String>,
@@ -586,7 +590,27 @@ async fn run_fetch(
     proxy: Option<String>,
     storage_dir: Option<std::path::PathBuf>,
     allow_private_network: bool,
-) -> anyhow::Result<()> {
+}
+
+async fn run_fetch(opts: RunFetchOpts) -> anyhow::Result<()> {
+    let RunFetchOpts {
+        url_str,
+        dump,
+        selector,
+        wait_secs,
+        timeout_secs,
+        wait_until,
+        user_agent,
+        stealth,
+        eval,
+        output,
+        quiet,
+        proxy,
+        storage_dir,
+        allow_private_network,
+    } = opts;
+    let url_str = url_str.as_str();
+    let wait_until = wait_until.as_str();
     // Whether the user explicitly passed --dump. With --eval also present this
     // decides whether we return the eval value or read the page after the
     // eval's async work settles (issue #248).

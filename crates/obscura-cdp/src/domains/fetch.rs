@@ -37,6 +37,12 @@ pub struct FetchInterceptState {
     request_counter: u64,
 }
 
+impl Default for FetchInterceptState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FetchInterceptState {
     pub fn new() -> Self {
         FetchInterceptState {

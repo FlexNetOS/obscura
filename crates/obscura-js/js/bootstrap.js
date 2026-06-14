@@ -2605,6 +2605,13 @@ class NetworkInformation {
   set onchange(v) {}
   get ontypechange() { return null; }
   set ontypechange(v) {}
+  // NetworkInformation is an EventTarget in real browsers (fires 'change').
+  // React 18 / mobile SPAs (e.g. goofish.com) call
+  // navigator.connection.addEventListener; missing it crashes the bundle with
+  // "addEventListener is not a function". Mirror the serviceWorker stub.
+  addEventListener() {}
+  removeEventListener() {}
+  dispatchEvent() { return true; }
 }
 _markNative(NetworkInformation);
 globalThis.NetworkInformation = NetworkInformation;

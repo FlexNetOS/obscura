@@ -335,7 +335,9 @@ mod mcp_hardening_tests {
     #[test]
     fn body_cap_is_sane() {
         // Far above a real JSON-RPC tool call, far below an OOM-inducing value.
-        assert!(MAX_BODY_BYTES >= 1 << 20);
-        assert!(MAX_BODY_BYTES <= 64 << 20);
+        // `MAX_BODY_BYTES` is a `const`, so pin its range at compile time: any
+        // future edit that pushes it outside [1 MiB, 64 MiB] fails to build.
+        const _: () = assert!(MAX_BODY_BYTES >= 1 << 20);
+        const _: () = assert!(MAX_BODY_BYTES <= 64 << 20);
     }
 }

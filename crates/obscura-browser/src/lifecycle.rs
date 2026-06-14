@@ -31,6 +31,9 @@ pub enum WaitUntil {
 }
 
 impl WaitUntil {
+    // Intentional infallible inherent mapper (unknown input defaults to `Load`),
+    // not the fallible `std::str::FromStr` contract — callers rely on a total fn.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s {
             "domcontentloaded" => WaitUntil::DomContentLoaded,

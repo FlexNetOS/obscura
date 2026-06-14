@@ -47,6 +47,12 @@ pub struct CdpContext {
     pub intercept_tx: Option<tokio::sync::mpsc::UnboundedSender<InterceptedRequest>>,
 }
 
+impl Default for CdpContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CdpContext {
     pub fn new() -> Self {
         Self::new_with_options(None, false)

@@ -239,12 +239,12 @@ impl Page {
                 if url.contains(&pattern[1..pattern.len() - 1]) {
                     return true;
                 }
-            } else if pattern.starts_with('*') {
-                if url.ends_with(&pattern[1..]) {
+            } else if let Some(suffix) = pattern.strip_prefix('*') {
+                if url.ends_with(suffix) {
                     return true;
                 }
-            } else if pattern.ends_with('*') {
-                if url.starts_with(&pattern[..pattern.len() - 1]) {
+            } else if let Some(prefix) = pattern.strip_suffix('*') {
+                if url.starts_with(prefix) {
                     return true;
                 }
             } else if url.contains(pattern) {
@@ -468,8 +468,8 @@ impl Page {
         );
         let all_to_execute: Vec<ScriptInfo> = scripts
             .into_iter()
-            .chain(deferred.into_iter())
-            .chain(async_scripts.into_iter())
+            .chain(deferred)
+            .chain(async_scripts)
             .collect();
 
         let mut resolved: Vec<(usize, String)> = Vec::new();
@@ -579,13 +579,11 @@ impl Page {
 
         let mut fetched: std::collections::HashMap<usize, (String, String, obscura_net::Response)> =
             std::collections::HashMap::new();
-        for result in fetch_results {
-            if let Some((idx, url, resp)) = result {
-                // Script bodies: only the HTTP Content-Type charset matters
-                // (no in-band meta-charset for JS).
-                let code = obscura_net::decode_non_html(&resp.body, resp.content_type());
-                fetched.insert(idx, (url, code, resp));
-            }
+        for (idx, url, resp) in fetch_results.into_iter().flatten() {
+            // Script bodies: only the HTTP Content-Type charset matters
+            // (no in-band meta-charset for JS).
+            let code = obscura_net::decode_non_html(&resp.body, resp.content_type());
+            fetched.insert(idx, (url, code, resp));
         }
 
         // Spec: readyState is "loading" while parser-discovered scripts execute.
@@ -1149,21 +1147,19 @@ impl Page {
             .collect()
             .await;
         let mut css_sources = Vec::new();
-        for result in css_results {
-            if let Some((url_str, resp)) = result {
-                // CSS bodies: honor the Content-Type charset; CSS @charset is
-                // out of scope for the current scrape-focused pipeline.
-                let css = obscura_net::decode_non_html(&resp.body, resp.content_type());
-                self.record_network_event(
-                    &url_str,
-                    "GET",
-                    "Stylesheet",
-                    resp.status,
-                    &resp.headers,
-                    resp.body.len(),
-                );
-                css_sources.push(css);
-            }
+        for (url_str, resp) in css_results.into_iter().flatten() {
+            // CSS bodies: honor the Content-Type charset; CSS @charset is
+            // out of scope for the current scrape-focused pipeline.
+            let css = obscura_net::decode_non_html(&resp.body, resp.content_type());
+            self.record_network_event(
+                &url_str,
+                "GET",
+                "Stylesheet",
+                resp.status,
+                &resp.headers,
+                resp.body.len(),
+            );
+            css_sources.push(css);
         }
 
         self.dom = Some(dom);

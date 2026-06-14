@@ -1,10 +1,10 @@
-/// Helpers shared across CDP domain handlers.
-///
-/// The file-scheme detector here is reused by every CDP entrypoint that can
-/// trigger a navigation, so we don't end up with one domain enforcing the
-/// `--allow-file-access` gate and another silently letting `file://` through
-/// (see GHSA-q55h-vfv9-qcr5 and its incomplete-fix variant in
-/// `Target.createTarget`).
+//! Helpers shared across CDP domain handlers.
+//!
+//! The file-scheme detector here is reused by every CDP entrypoint that can
+//! trigger a navigation, so we don't end up with one domain enforcing the
+//! `--allow-file-access` gate and another silently letting `file://` through
+//! (see GHSA-q55h-vfv9-qcr5 and its incomplete-fix variant in
+//! `Target.createTarget`).
 
 /// Returns true when `raw` parses as a `file:`-scheme URL, or syntactically
 /// starts with `file:` after a possible leading-whitespace strip. Matching is

@@ -9,6 +9,9 @@ use crate::util::url_is_file_scheme;
 /// by both the in-process `do_navigate` path and the spawned path in
 /// `server::process_navigation`, so the recent goto-returns-Response /
 /// per-isolated-world fixes don't have to be duplicated.
+// Heterogeneous borrowed/owned navigation inputs shared by four call sites; a
+// params struct would force awkward lifetimes for the &-fields for no real win.
+#[allow(clippy::too_many_arguments)]
 pub fn emit_navigation_events(
     ctx: &mut CdpContext,
     session_id: &Option<String>,
