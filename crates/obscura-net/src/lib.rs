@@ -9,8 +9,8 @@ pub mod wreq_client;
 
 pub use blocklist::is_blocked as is_tracker_blocked;
 pub use client::{
-    env_allows_private_network, is_forbidden_ip, ObscuraHttpClient, ObscuraNetError, RequestInfo,
-    ResourceType, Response, SsrfGuardResolver,
+    env_allows_private_network, is_forbidden_ip, load_ca_certs, ObscuraHttpClient, ObscuraNetError,
+    RequestInfo, ResourceType, Response, SsrfGuardResolver,
 };
 pub use cookies::{CookieInfo, CookieJar};
 pub use encoding::{

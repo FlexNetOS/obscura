@@ -92,14 +92,31 @@ pub struct BrowserState {
 
 impl BrowserState {
     pub fn new(proxy: Option<String>, user_agent: Option<String>, stealth: bool) -> Self {
+        Self::new_with_ca(proxy, user_agent, stealth, None)
+    }
+
+    /// Like [`new`](Self::new) but also threads a custom CA bundle path (the
+    /// lane governed-egress seam) into the browser context so every MCP-driven
+    /// page fetch trusts the governed-proxy root. `new` delegates here with
+    /// `ca = None`.
+    pub fn new_with_ca(
+        proxy: Option<String>,
+        user_agent: Option<String>,
+        stealth: bool,
+        ca: Option<String>,
+    ) -> Self {
         BrowserState {
             tabs: std::collections::BTreeMap::new(),
             active_tab: None,
             tab_counter: 0,
-            context: Arc::new(BrowserContext::with_options(
+            context: Arc::new(BrowserContext::with_storage_network_ca(
                 "mcp".to_string(),
                 proxy,
                 stealth,
+                None,
+                None,
+                false,
+                ca,
             )),
             user_agent,
             console_messages: Vec::new(),
@@ -199,12 +216,23 @@ pub(crate) async fn dispatch(
 }
 
 pub async fn run(proxy: Option<String>, user_agent: Option<String>, stealth: bool) -> Result<()> {
+    run_with_ca(proxy, user_agent, stealth, None).await
+}
+
+/// Like [`run`] but also threads a custom CA bundle path (the lane
+/// governed-egress seam). `run` delegates here with `ca = None`.
+pub async fn run_with_ca(
+    proxy: Option<String>,
+    user_agent: Option<String>,
+    stealth: bool,
+    ca: Option<String>,
+) -> Result<()> {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
     let mut reader = BufReader::new(stdin);
     let mut writer = stdout;
 
-    let mut state = BrowserState::new(proxy, user_agent, stealth);
+    let mut state = BrowserState::new_with_ca(proxy, user_agent, stealth, ca);
 
     loop {
         // MCP stdio transport: newline-delimited JSON (one message per line)

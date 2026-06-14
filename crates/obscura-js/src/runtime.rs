@@ -117,10 +117,24 @@ impl ObscuraJsRuntime {
     /// through `proxy_url` (#139). `None` is equivalent to `with_base_url`
     /// (direct connection).
     pub fn with_base_url_and_proxy(base_url: &str, proxy_url: Option<String>) -> Self {
+        Self::with_base_url_proxy_ca(base_url, proxy_url, None)
+    }
+
+    /// Construct a runtime whose ES-module loader routes dynamic imports
+    /// through `proxy_url` AND trusts the certificates in the `ca_path` PEM
+    /// bundle (lane governed-egress seam). `None`/`None` is equivalent to
+    /// `with_base_url` (direct connection, default roots).
+    pub fn with_base_url_proxy_ca(
+        base_url: &str,
+        proxy_url: Option<String>,
+        ca_path: Option<String>,
+    ) -> Self {
         let state = Rc::new(RefCell::new(ObscuraState::new()));
         let state_clone = state.clone();
 
-        let module_loader = Rc::new(ObscuraModuleLoader::with_proxy(base_url, proxy_url));
+        let module_loader = Rc::new(ObscuraModuleLoader::with_proxy_ca(
+            base_url, proxy_url, ca_path,
+        ));
 
         let mut runtime = JsRuntime::new(RuntimeOptions {
             extensions: vec![build_extension()],

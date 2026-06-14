@@ -34,3 +34,16 @@ wreq = { version = "=6.0.0-rc.29", optional = true, features = ["prefix-symbols"
 
 [target.'cfg(not(any(target_os = "linux", target_os = "android")))'.dependencies]
 wreq = { version = "=6.0.0-rc.29", optional = true, features = ["socks"] }
+
+# Dev-only: a real localhost HTTPS round-trip for the custom-CA trust test
+# (the lane governed-egress seam). rcgen mints a self-signed CA + leaf, and a
+# tiny hyper/tokio-rustls server terminates TLS with that leaf, so the test
+# proves the configured CA is actually trusted (and that WITHOUT it the fetch
+# fails with a cert error — validation stays enforced). All TLS crates here are
+# already in the dependency tree transitively via reqwest's rustls-tls backend.
+[dev-dependencies]
+rcgen = "0.13"
+tokio-rustls = "0.26"
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
