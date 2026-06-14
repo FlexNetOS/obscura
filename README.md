@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/h4ckf0r0day/obscura/main/assets/icon.png" alt="Obscura" width="80" />
+  <img src="https://raw.githubusercontent.com/FlexNetOS/obscura/main/assets/icon.png" alt="Obscura" width="80" />
 </p>
 
 <h2 align="center">Obscura</h2>
