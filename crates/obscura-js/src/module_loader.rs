@@ -30,7 +30,7 @@ impl ObscuraModuleLoader {
 }
 
 fn io_err(msg: String) -> ModuleLoaderError {
-    std::io::Error::new(std::io::ErrorKind::Other, msg).into()
+    std::io::Error::other(msg).into()
 }
 
 impl ModuleLoader for ObscuraModuleLoader {

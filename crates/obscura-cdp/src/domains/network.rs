@@ -93,6 +93,32 @@ pub async fn handle(
     }
 }
 
+pub(crate) fn cookie_info_to_cdp_json(c: &obscura_net::CookieInfo) -> Value {
+    let expires = c.expires.unwrap_or(SESSION_COOKIE_EXPIRES);
+    let session = c.expires.is_none();
+    let same_site = if c.same_site.is_empty() {
+        DEFAULT_SAME_SITE
+    } else {
+        c.same_site.as_str()
+    };
+    json!({
+        "name": c.name,
+        "value": c.value,
+        "domain": c.domain,
+        "path": c.path,
+        "expires": expires,
+        "size": c.name.len() + c.value.len(),
+        "httpOnly": c.http_only,
+        "secure": c.secure,
+        "session": session,
+        "sameSite": same_site,
+        "sameParty": false,
+        "sourceScheme": if c.secure { SOURCE_SCHEME_SECURE } else { SOURCE_SCHEME_NONSECURE },
+        "sourcePort": if c.secure { DEFAULT_SECURE_PORT } else { DEFAULT_INSECURE_PORT },
+        "priority": "Medium",
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,30 +225,4 @@ mod tests {
             .expect("clearBrowserCookies must succeed");
         assert!(ctx.default_context.cookie_jar.get_all_cookies().is_empty());
     }
-}
-
-pub(crate) fn cookie_info_to_cdp_json(c: &obscura_net::CookieInfo) -> Value {
-    let expires = c.expires.unwrap_or(SESSION_COOKIE_EXPIRES);
-    let session = c.expires.is_none();
-    let same_site = if c.same_site.is_empty() {
-        DEFAULT_SAME_SITE
-    } else {
-        c.same_site.as_str()
-    };
-    json!({
-        "name": c.name,
-        "value": c.value,
-        "domain": c.domain,
-        "path": c.path,
-        "expires": expires,
-        "size": c.name.len() + c.value.len(),
-        "httpOnly": c.http_only,
-        "secure": c.secure,
-        "session": session,
-        "sameSite": same_site,
-        "sameParty": false,
-        "sourceScheme": if c.secure { SOURCE_SCHEME_SECURE } else { SOURCE_SCHEME_NONSECURE },
-        "sourcePort": if c.secure { DEFAULT_SECURE_PORT } else { DEFAULT_INSECURE_PORT },
-        "priority": "Medium",
-    })
 }

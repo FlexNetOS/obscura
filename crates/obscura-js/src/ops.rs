@@ -65,6 +65,12 @@ pub struct ObscuraState {
     pub pending_binding_calls: Vec<(String, String)>,
 }
 
+impl Default for ObscuraState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ObscuraState {
     pub fn new() -> Self {
         ObscuraState {
@@ -1065,11 +1071,11 @@ fn glob_match(pattern: &str, url: &str) -> bool {
     if pattern.starts_with('*') && pattern.ends_with('*') {
         return url.contains(&pattern[1..pattern.len() - 1]);
     }
-    if pattern.starts_with('*') {
-        return url.ends_with(&pattern[1..]);
+    if let Some(suffix) = pattern.strip_prefix('*') {
+        return url.ends_with(suffix);
     }
-    if pattern.ends_with('*') {
-        return url.starts_with(&pattern[..pattern.len() - 1]);
+    if let Some(prefix) = pattern.strip_suffix('*') {
+        return url.starts_with(prefix);
     }
     url == pattern
 }

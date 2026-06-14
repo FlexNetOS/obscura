@@ -165,8 +165,8 @@ pub fn decode_non_html(bytes: &[u8], content_type_header: Option<&str>) -> Strin
 /// Resolve the encoding to use for an HTML response, mirroring the HTML5
 /// detection order. Returns the encoding and a tag describing where it was
 /// picked from (for logging / tests).
-pub fn detect_encoding<'a>(
-    bytes: &'a [u8],
+pub fn detect_encoding(
+    bytes: &[u8],
     content_type_header: Option<&str>,
 ) -> (&'static Encoding, &'static str) {
     if let Some(charset) = content_type_header.and_then(charset_from_content_type) {
@@ -235,7 +235,7 @@ fn sniff_meta_charset(bytes: &[u8]) -> Option<&'static Encoding> {
             if let Some(eq_rest) = after.strip_prefix('=') {
                 let value = eq_rest
                     .trim_start()
-                    .trim_start_matches(|c: char| c == '"' || c == '\'')
+                    .trim_start_matches(['"', '\''])
                     .split(|c: char| {
                         c == '"' || c == '\'' || c == ';' || c.is_whitespace() || c == '/'
                     })

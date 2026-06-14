@@ -161,9 +161,8 @@ pub async fn handle(
                         );
                         page.evaluate(&js);
                     }
-                    "char" => {
-                        if !text.is_empty() {
-                            let js = format!(
+                    "char" if !text.is_empty() => {
+                        let js = format!(
                                 "(function() {{\
                                     var target = document.activeElement;\
                                     if (target && (target.localName === 'input' || target.localName === 'textarea')) {{\
@@ -173,8 +172,7 @@ pub async fn handle(
                                 }})()",
                                 text = text.replace('\'', "\\'").replace('\\', "\\\\"),
                             );
-                            page.evaluate(&js);
-                        }
+                        page.evaluate(&js);
                     }
                     _ => {}
                 }

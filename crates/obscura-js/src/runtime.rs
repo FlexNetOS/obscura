@@ -1296,10 +1296,15 @@ mod tests {
 
     fn setup_runtime(html: &str) -> ObscuraJsRuntime {
         let dom = parse_html(html);
-        let rt = ObscuraJsRuntime::new();
+        let mut rt = ObscuraJsRuntime::new();
         rt.set_dom(dom);
         rt.set_url("http://example.com/test");
         rt.set_title("Test Page");
+        // Initialize the JS document/DOM bindings, exactly as production page
+        // setup does (obscura-browser page.rs, after the set_* calls). Without
+        // this, globalThis.document is null and every DOM-accessing test
+        // eval's to Null.
+        rt.run_page_init();
         rt
     }
 
@@ -1948,11 +1953,11 @@ mod tests {
         drop(rt2);
 
         if let Some(dom) = dom1 {
-            let rt1b = ObscuraJsRuntime::new();
+            let mut rt1b = ObscuraJsRuntime::new();
             rt1b.set_dom(dom);
             rt1b.set_url("http://example.com");
             rt1b.set_title("Page1");
-            let mut rt1b = rt1b;
+            rt1b.run_page_init();
             let title1b = rt1b
                 .evaluate("document.querySelector('h1').textContent")
                 .unwrap();
@@ -2045,11 +2050,14 @@ mod tests {
     ) -> (ObscuraJsRuntime, std::sync::Arc<obscura_net::CookieJar>) {
         let dom = obscura_dom::parse_html(html);
         let jar = std::sync::Arc::new(obscura_net::CookieJar::new());
-        let rt = ObscuraJsRuntime::new();
+        let mut rt = ObscuraJsRuntime::new();
         rt.set_dom(dom);
         rt.set_url("http://example.com/test");
         rt.set_title("Test Page");
         rt.set_cookie_jar(jar.clone());
+        // Initialize the JS document/DOM bindings after the set_* calls, as
+        // production page setup does — without this globalThis.document is null.
+        rt.run_page_init();
         (rt, jar)
     }
 

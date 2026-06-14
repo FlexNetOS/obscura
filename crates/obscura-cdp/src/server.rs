@@ -121,6 +121,9 @@ pub async fn start_with_host_security_and_storage(
 /// Full serve entry point that also accepts `allow_private_network` (issue
 /// #33). Older entry points default it to `false` so existing callers and
 /// public API consumers are unaffected.
+// Public entry point in a deliberately layered family of backward-compatible
+// `start_*` wrappers; changing its arity to a params struct would break the API.
+#[allow(clippy::too_many_arguments)]
 pub async fn start_with_full_serve_options(
     port: u16,
     host: &str,
@@ -353,6 +356,9 @@ fn handle_http_json_blocking(
     Ok(())
 }
 
+// Internal sink the layered `start_*` entry points all funnel into; mirrors
+// their option set, so it shares their backward-compatible arity by design.
+#[allow(clippy::too_many_arguments)]
 async fn cdp_processor(
     mut rx: mpsc::UnboundedReceiver<ServerMessage>,
     proxy: Option<String>,
