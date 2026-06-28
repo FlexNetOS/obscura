@@ -1,0 +1,29 @@
+name: differential-drive
+
+# GENERIC, repo-agnostic LIVE differential-drive verification (relay-#134 doctrine: drive the
+# REAL binary/CLI and DIFF its output; green unit tests are not proof; cases-run must be > 0;
+# absence is FAIL-CLOSED). Deployed verbatim fleet-wide by scripts/handoff-loop-init.sh
+# (HFTASK-0065). DORMANT by default — invoked only via workflow_call (from a repo's own CI) or
+# workflow_dispatch — so deploying it never spams red checks on a repo that has not yet authored
+# scripts/differential-drive.cases.sh. When invoked WITHOUT a cases file the harness fails closed
+# (absence is a failure, never a silent pass).
+#
+# Repo-specific build setup (toolchains, sibling checkouts, codegen) belongs in the repo's
+# scripts/differential-drive.cases.sh, NOT here — this workflow stays generic so one identical
+# file is correct for every fleet member.
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  differential-drive:
+    name: differential-drive (live)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run the live differential-drive harness (fail-closed)
+        run: bash scripts/differential-drive.sh
